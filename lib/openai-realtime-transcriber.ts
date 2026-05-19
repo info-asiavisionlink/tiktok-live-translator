@@ -146,6 +146,7 @@ export class OpenAiRealtimeTranscriber {
     this.send({
       type: "session.update",
       session: {
+        type: "realtime",
         modalities: ["audio", "text"],
         audio: {
           input: {
