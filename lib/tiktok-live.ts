@@ -94,11 +94,32 @@ export async function connectToTikTokLive(username: string): Promise<void> {
   const store = getSessionStore();
   store.startSession(username);
 
-  const connection = new TikTokLiveConnection(username, {
-    processInitialData: false,
-    enableExtendedGiftInfo: true,
-    fetchRoomInfoOnConnect: true,
+  const sessionId = process.env.TIKTOK_SESSION_ID?.trim();
+
+  console.log("[tiktok] Starting connection:", {
+    username,
+    hasSessionId: !!sessionId,
   });
+
+  const connection = new TikTokLiveConnection(
+    username,
+    sessionId
+      ? {
+          processInitialData: false,
+          enableExtendedGiftInfo: true,
+          fetchRoomInfoOnConnect: true,
+          requestPollingIntervalMs: 2000,
+          sessionId,
+          authenticateWs: true,
+          ttTargetIdc: process.env.TIKTOK_TT_TARGET_IDC?.trim() ?? "",
+        }
+      : {
+          processInitialData: false,
+          enableExtendedGiftInfo: true,
+          fetchRoomInfoOnConnect: true,
+          requestPollingIntervalMs: 2000,
+        },
+  );
 
   setActiveConnection(connection);
   setConnecting(true);
