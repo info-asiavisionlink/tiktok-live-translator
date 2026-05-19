@@ -42,6 +42,8 @@ export class SessionStore {
   private comments: Comment[] = [];
   private gifts: Gift[] = [];
   private status: SessionStatus = emptyStatus();
+  private currentPartialTranscript = "";
+  private transcriptBuffer: string[] = [];
 
   reset(): void {
     this.username = null;
@@ -49,6 +51,8 @@ export class SessionStore {
     this.comments = [];
     this.gifts = [];
     this.status = emptyStatus();
+    this.currentPartialTranscript = "";
+    this.transcriptBuffer = [];
   }
 
   startSession(username: string): void {
@@ -87,6 +91,36 @@ export class SessionStore {
     this.status = {
       ...this.status,
       followCount: this.status.followCount + 1,
+    };
+  }
+
+  setCurrentPartialTranscript(text: string): void {
+    this.currentPartialTranscript = text;
+  }
+
+  getCurrentPartialTranscript(): string {
+    return this.currentPartialTranscript;
+  }
+
+  appendTranscriptBuffer(text: string): void {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    this.transcriptBuffer.push(trimmed);
+  }
+
+  drainTranscriptBuffer(): string[] {
+    const drained = [...this.transcriptBuffer];
+    this.transcriptBuffer = [];
+    return drained;
+  }
+
+  clearDisplayTranscripts(): void {
+    this.transcripts = [];
+    this.status = {
+      ...this.status,
+      totalTranscripts: 0,
     };
   }
 
@@ -157,6 +191,7 @@ export class SessionStore {
       gifts: [...this.gifts],
       status: { ...this.status },
       currentTranscript: this.getCurrentTranscript(),
+      currentPartialTranscript: this.currentPartialTranscript,
     };
   }
 }

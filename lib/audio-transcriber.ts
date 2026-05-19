@@ -1,10 +1,14 @@
 import fs from "fs";
 import path from "path";
+import { type ChildProcess } from "node:child_process";
 import ffmpeg from "fluent-ffmpeg";
 import { dir } from "tmp-promise";
 import type { FfmpegCommand } from "fluent-ffmpeg";
-import { saveTranscript } from "./transcript-handler";
+import { pipePcmToRealtime, stopPcmAudioPipe } from "./audio-pcm-pipe";
+import { OpenAiRealtimeTranscriber } from "./openai-realtime-transcriber";
+import { flushTranscriptBlock } from "./realtime-transcript-handler";
 import { resolveFfmpegPath } from "./stream-probe";
+import { saveTranscript } from "./transcript-handler";
 import { resolveLiveStreamUrlWithRetry } from "./tiktok-stream-url";
 import { transcribeAudioFile } from "./whisper-transcribe";
 
@@ -14,15 +18,23 @@ const POLL_INTERVAL_MS = 1000;
 const STABLE_CHECK_INTERVAL_MS = 250;
 const STABLE_CHECK_MAX_ATTEMPTS = 12;
 const FFMPEG_RESTART_DELAY_MS = 3000;
+const BLOCK_FLUSH_MS = 3 * 60 * 1000;
+const REALTIME_CONNECT_TIMEOUT_MS = 12_000;
+
+type TranscriptionMode = "realtime" | "whisper" | null;
 
 type AudioTranscriberState = {
   active: boolean;
   stoppingIntentionally: boolean;
+  mode: TranscriptionMode;
+  streamUrl: string | null;
+  liveUrl: string | null;
+  realtimeTranscriber: OpenAiRealtimeTranscriber | null;
+  pcmFfmpegProcess: ChildProcess | null;
+  blockFlushInterval: ReturnType<typeof setInterval> | null;
   tmpDir: string | null;
   cleanupTmp: (() => Promise<void>) | null;
   ffmpegCommand: FfmpegCommand | null;
-  liveUrl: string | null;
-  streamUrl: string | null;
   outputPattern: string | null;
   processedFilenames: Set<string>;
   pollLoopPromise: Promise<void> | null;
@@ -38,11 +50,15 @@ function getState(): AudioTranscriberState {
     globalForAudio.__audioTranscriberState = {
       active: false,
       stoppingIntentionally: false,
+      mode: null,
+      streamUrl: null,
+      liveUrl: null,
+      realtimeTranscriber: null,
+      pcmFfmpegProcess: null,
+      blockFlushInterval: null,
       tmpDir: null,
       cleanupTmp: null,
       ffmpegCommand: null,
-      liveUrl: null,
-      streamUrl: null,
       outputPattern: null,
       processedFilenames: new Set(),
       pollLoopPromise: null,
@@ -53,13 +69,97 @@ function getState(): AudioTranscriberState {
 }
 
 function configureFfmpeg(): void {
-  const ffmpegPath = resolveFfmpegPath();
-  ffmpeg.setFfmpegPath(ffmpegPath);
-  console.info("[Audio] Using FFmpeg:", ffmpegPath);
+  ffmpeg.setFfmpegPath(resolveFfmpegPath());
+  console.info("[Audio] Using FFmpeg:", resolveFfmpegPath());
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function startBlockFlushTimer(): void {
+  const state = getState();
+  if (state.blockFlushInterval) {
+    clearInterval(state.blockFlushInterval);
+  }
+
+  state.blockFlushInterval = setInterval(() => {
+    void flushTranscriptBlock();
+  }, BLOCK_FLUSH_MS);
+}
+
+function stopBlockFlushTimer(): void {
+  const state = getState();
+  if (state.blockFlushInterval) {
+    clearInterval(state.blockFlushInterval);
+    state.blockFlushInterval = null;
+  }
+}
+
+function stopRealtimePipeline(): void {
+  const state = getState();
+
+  stopPcmAudioPipe(state.pcmFfmpegProcess);
+  state.pcmFfmpegProcess = null;
+
+  if (state.realtimeTranscriber) {
+    state.realtimeTranscriber.disconnect();
+    state.realtimeTranscriber = null;
+  }
+}
+
+async function tryStartRealtimePipeline(streamUrl: string): Promise<boolean> {
+  const state = getState();
+  const transcriber = new OpenAiRealtimeTranscriber();
+
+  try {
+    const connectPromise = transcriber.connect();
+    const timeoutPromise = sleep(REALTIME_CONNECT_TIMEOUT_MS).then(() => {
+      throw new Error("Realtime connection timed out");
+    });
+
+    await Promise.race([connectPromise, timeoutPromise]);
+
+    state.realtimeTranscriber = transcriber;
+    state.mode = "realtime";
+
+    state.pcmFfmpegProcess = pipePcmToRealtime(streamUrl, transcriber, (error) => {
+      if (!state.active || state.stoppingIntentionally) {
+        return;
+      }
+      console.error("[Realtime] Error:", error.message);
+      void switchToWhisperFallback("PCM pipe failed");
+    });
+
+    console.info("[Audio] Realtime transcription pipeline started");
+    return true;
+  } catch (error) {
+    console.error(
+      "[Realtime] Error:",
+      error instanceof Error ? error.message : error,
+    );
+    transcriber.disconnect();
+    return false;
+  }
+}
+
+async function switchToWhisperFallback(reason: string): Promise<void> {
+  const state = getState();
+
+  if (!state.active || state.mode === "whisper") {
+    return;
+  }
+
+  console.warn(`[Audio] Switching to Whisper chunk fallback: ${reason}`);
+  stopRealtimePipeline();
+  state.mode = "whisper";
+
+  const streamUrl = state.streamUrl;
+  if (!streamUrl) {
+    return;
+  }
+
+  await startWhisperChunkPipeline(streamUrl);
 }
 
 function parseChunkIndex(fileName: string): number {
@@ -104,7 +204,7 @@ async function safeUnlink(filePath: string): Promise<void> {
   try {
     await fs.promises.unlink(filePath);
   } catch {
-    // ignore missing files
+    // ignore
   }
 }
 
@@ -139,7 +239,7 @@ async function scanAndProcessChunks(): Promise<void> {
   const state = getState();
   const tmpDir = state.tmpDir;
 
-  if (!state.active || !tmpDir) {
+  if (!state.active || !tmpDir || state.mode !== "whisper") {
     return;
   }
 
@@ -172,7 +272,7 @@ async function scanAndProcessChunks(): Promise<void> {
 async function runPollLoop(): Promise<void> {
   const state = getState();
 
-  while (state.active) {
+  while (state.active && state.mode === "whisper") {
     try {
       await scanAndProcessChunks();
     } catch (error) {
@@ -200,7 +300,7 @@ function attachFfmpegHandlers(command: FfmpegCommand): void {
       return;
     }
     console.warn("[Audio] FFmpeg ended while stream active; scheduling restart");
-    void scheduleFfmpegRestart();
+    void scheduleWhisperRestart();
   });
 
   command.on("error", (error) => {
@@ -224,11 +324,11 @@ function attachFfmpegHandlers(command: FfmpegCommand): void {
     }
 
     console.error("[Audio] Error: FFmpeg failed", message);
-    void scheduleFfmpegRestart();
+    void scheduleWhisperRestart();
   });
 }
 
-async function scheduleFfmpegRestart(): Promise<void> {
+async function scheduleWhisperRestart(): Promise<void> {
   const state = getState();
 
   if (!state.active || state.stoppingIntentionally || state.isRestartingFfmpeg) {
@@ -244,27 +344,17 @@ async function scheduleFfmpegRestart(): Promise<void> {
       return;
     }
 
-    if (state.ffmpegCommand) {
-      try {
-        state.ffmpegCommand.removeAllListeners();
-        state.ffmpegCommand.kill("SIGTERM");
-      } catch {
-        // ignore
-      }
-      state.ffmpegCommand = null;
-    }
+    killWhisperFfmpeg();
 
     const streamUrl = await resolveLiveStreamUrlWithRetry();
     if (!streamUrl) {
-      console.error(
-        "[Audio] Error: Could not resolve validated audio stream for FFmpeg restart",
-      );
+      console.error("[Audio] Error: Could not resolve stream URL for Whisper restart");
       return;
     }
 
     state.streamUrl = streamUrl;
     const segmentStart = getNextSegmentStartNumber(state.tmpDir);
-    console.info(`[Audio] Restarting FFmpeg (segment_start_number=${segmentStart})`);
+    console.info(`[Audio] Restarting Whisper FFmpeg (segment_start_number=${segmentStart})`);
     state.ffmpegCommand = startFfmpegSegmenter(
       streamUrl,
       state.outputPattern,
@@ -319,7 +409,7 @@ function startFfmpegSegmenter(
   return command;
 }
 
-function killFfmpegCommand(): void {
+function killWhisperFfmpeg(): void {
   const state = getState();
 
   if (!state.ffmpegCommand) {
@@ -334,6 +424,25 @@ function killFfmpegCommand(): void {
   }
 
   state.ffmpegCommand = null;
+}
+
+async function startWhisperChunkPipeline(streamUrl: string): Promise<void> {
+  const state = getState();
+
+  if (!state.tmpDir || !state.outputPattern) {
+    const tmp = await dir({ prefix: "tiktok-audio-", unsafeCleanup: true });
+    state.tmpDir = tmp.path;
+    state.cleanupTmp = tmp.cleanup;
+    state.outputPattern = path.join(tmp.path, "chunk_%03d.mp3");
+    state.processedFilenames.clear();
+  }
+
+  state.mode = "whisper";
+  state.streamUrl = streamUrl;
+  killWhisperFfmpeg();
+  state.ffmpegCommand = startFfmpegSegmenter(streamUrl, state.outputPattern, 0);
+  state.pollLoopPromise = runPollLoop();
+  console.info("[Audio] Whisper chunk fallback pipeline started");
 }
 
 export async function startAudioTranscription(liveUrl: string): Promise<void> {
@@ -351,7 +460,6 @@ export async function startAudioTranscription(liveUrl: string): Promise<void> {
 
   const state = getState();
   const tmp = await dir({ prefix: "tiktok-audio-", unsafeCleanup: true });
-  const outputPattern = path.join(tmp.path, "chunk_%03d.mp3");
 
   state.active = true;
   state.stoppingIntentionally = false;
@@ -359,35 +467,45 @@ export async function startAudioTranscription(liveUrl: string): Promise<void> {
   state.streamUrl = streamUrl;
   state.tmpDir = tmp.path;
   state.cleanupTmp = tmp.cleanup;
-  state.outputPattern = outputPattern;
+  state.outputPattern = path.join(tmp.path, "chunk_%03d.mp3");
   state.processedFilenames.clear();
+  state.mode = null;
 
-  try {
-    state.ffmpegCommand = startFfmpegSegmenter(streamUrl, outputPattern, 0);
-    state.pollLoopPromise = runPollLoop();
-    console.info("[Audio] Audio transcription pipeline started");
-  } catch (error) {
-    console.error("[Audio] Error: Failed to start transcription", error);
-    await stopAudioTranscription();
+  startBlockFlushTimer();
+
+  const realtimeStarted = await tryStartRealtimePipeline(streamUrl);
+  if (!realtimeStarted) {
+    console.warn("[Audio] Realtime API unavailable, using Whisper chunk fallback");
+    await startWhisperChunkPipeline(streamUrl);
   }
 }
 
 export async function stopAudioTranscription(): Promise<void> {
   const state = getState();
 
-  if (!state.active && !state.ffmpegCommand && !state.tmpDir) {
+  if (
+    !state.active &&
+    !state.realtimeTranscriber &&
+    !state.ffmpegCommand &&
+    !state.pcmFfmpegProcess &&
+    !state.tmpDir
+  ) {
     return;
   }
 
   state.stoppingIntentionally = true;
   state.active = false;
 
-  killFfmpegCommand();
+  stopBlockFlushTimer();
+  stopRealtimePipeline();
+  killWhisperFfmpeg();
 
   if (state.pollLoopPromise) {
     await state.pollLoopPromise.catch(() => undefined);
     state.pollLoopPromise = null;
   }
+
+  await flushTranscriptBlock();
 
   if (state.tmpDir) {
     try {
@@ -415,6 +533,7 @@ export async function stopAudioTranscription(): Promise<void> {
   state.outputPattern = null;
   state.processedFilenames.clear();
   state.isRestartingFfmpeg = false;
+  state.mode = null;
   state.stoppingIntentionally = false;
 
   console.info("[Audio] Audio transcription stopped");

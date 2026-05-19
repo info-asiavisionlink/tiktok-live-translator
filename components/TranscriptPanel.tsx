@@ -9,75 +9,69 @@ interface TranscriptPanelProps {
 
 const MAX_DISPLAY = 50;
 
-function formatTimestamp(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
-
 export function TranscriptPanel({ session }: TranscriptPanelProps) {
-  const scrollRef = useRef<HTMLUListElement>(null);
+  const historyRef = useRef<HTMLUListElement>(null);
 
-  const transcripts = [...(session.transcripts || [])]
+  const partial = session.currentPartialTranscript?.trim() ?? "";
+
+  const history = [...(session.transcripts || [])]
     .reverse()
     .slice(0, MAX_DISPLAY);
 
-  const newestId = transcripts[0]?.id ?? transcripts[0]?.timestamp ?? null;
+  const newestId = history[0]?.id ?? history[0]?.timestamp ?? null;
 
   useEffect(() => {
-    if (transcripts.length === 0) {
+    if (partial) {
+      console.log("[UI] Rendering partial:", partial);
+    }
+  }, [partial]);
+
+  useEffect(() => {
+    if (history.length === 0) {
       return;
     }
-    const el = scrollRef.current;
+    const el = historyRef.current;
     if (el) {
       el.scrollTop = 0;
     }
-  }, [newestId, transcripts.length]);
-
-  useEffect(() => {
-    if (transcripts[0]) {
-      console.log("[UI] Rendering transcript:", transcripts[0].original);
-    }
-  }, [newestId, transcripts]);
+  }, [newestId, history.length]);
 
   return (
-    <section className="flex h-full max-h-[420px] flex-col rounded-2xl bg-white p-6 shadow-md shadow-slate-200/60 ring-1 ring-slate-100">
+    <section className="flex h-full max-h-[480px] flex-col rounded-2xl bg-white p-6 shadow-md shadow-slate-200/60 ring-1 ring-slate-100">
       <h2 className="shrink-0 text-xl font-bold tracking-tight text-slate-900">
-        配信者の発話履歴
+        配信者の発話
       </h2>
-      <ul
-        ref={scrollRef}
-        className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
-      >
-        {transcripts.length === 0 ? (
-          <li className="py-8 text-center text-slate-400">
-            発話を待機中…
-          </li>
-        ) : (
-          transcripts.map((transcript) => (
-            <li
-              key={transcript.id ?? transcript.timestamp}
-              className="rounded-xl border border-slate-100 bg-slate-50/80 p-4"
-            >
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Transcript
-              </p>
-              <p className="mt-1 text-sm leading-relaxed text-slate-800">
-                {transcript.original}
-              </p>
-              <p className="mt-3 text-xs text-slate-400">
-                {formatTimestamp(transcript.timestamp)}
-              </p>
+
+      <div className="mt-4 shrink-0 rounded-xl border border-rose-100 bg-rose-50/50 px-4 py-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-rose-500">
+          現在認識中
+        </p>
+        <p className="mt-2 min-h-[2.5rem] text-2xl font-medium leading-relaxed text-slate-900">
+          {partial || (
+            <span className="text-lg font-normal text-slate-400">…</span>
+          )}
+        </p>
+      </div>
+
+      <div className="mt-5 flex min-h-0 flex-1 flex-col">
+        <p className="shrink-0 text-sm font-semibold text-slate-700">発話履歴</p>
+        <ul
+          ref={historyRef}
+          className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1 text-sm leading-relaxed text-slate-800"
+        >
+          {history.length === 0 ? (
+            <li className="py-6 text-center text-slate-400">
+              確定した発話はまだありません
             </li>
-          ))
-        )}
-      </ul>
+          ) : (
+            history.map((transcript) => (
+              <li key={transcript.id ?? transcript.timestamp}>
+                • {transcript.original}
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
     </section>
   );
 }

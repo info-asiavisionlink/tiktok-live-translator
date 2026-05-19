@@ -19,6 +19,7 @@ export async function GET() {
     username: snapshot.username,
     currentTranscript,
     transcript: currentTranscript,
+    currentPartialTranscript: snapshot.currentPartialTranscript,
     transcripts: snapshot.transcripts,
     comments: snapshot.comments,
     gifts: snapshot.gifts,

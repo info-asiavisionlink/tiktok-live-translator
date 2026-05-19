@@ -14,7 +14,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tiktok-live-connector": "^2.1.1-beta1",
-    "tmp-promise": "^3.0.3"
+    "tmp-promise": "^3.0.3",
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -22,6 +23,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",

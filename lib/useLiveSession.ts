@@ -27,6 +27,7 @@ const EMPTY_STATUS: SessionStatus = {
 export interface LiveSessionView {
   status: SessionStatus;
   currentTranscript: Transcript | null;
+  currentPartialTranscript: string;
   transcripts: Transcript[];
 }
 
@@ -53,6 +54,7 @@ export function useLiveSession() {
   const [session, setSession] = useState<LiveSessionView>({
     status: EMPTY_STATUS,
     currentTranscript: null,
+    currentPartialTranscript: "",
     transcripts: [],
   });
   const [comments, setComments] = useState<Comment[]>([]);
@@ -86,6 +88,7 @@ export function useLiveSession() {
       setSession({
         status: { ...data.status },
         currentTranscript,
+        currentPartialTranscript: data.currentPartialTranscript ?? "",
         transcripts: [...data.transcripts],
       });
       setComments([...data.comments]);
@@ -109,7 +112,12 @@ export function useLiveSession() {
   const resetSession = useCallback(() => {
     stopPolling();
     void stopLiveSession();
-    setSession({ status: EMPTY_STATUS, currentTranscript: null, transcripts: [] });
+    setSession({
+      status: EMPTY_STATUS,
+      currentTranscript: null,
+      currentPartialTranscript: "",
+      transcripts: [],
+    });
     setComments([]);
     setGifts([]);
     setError(null);
@@ -130,7 +138,12 @@ export function useLiveSession() {
       setPhase("loading");
       setError(null);
       setSuccessMessage(null);
-      setSession({ status: EMPTY_STATUS, currentTranscript: null, transcripts: [] });
+      setSession({
+      status: EMPTY_STATUS,
+      currentTranscript: null,
+      currentPartialTranscript: "",
+      transcripts: [],
+    });
       setComments([]);
       setGifts([]);
       stopPolling();
