@@ -3,14 +3,16 @@ import {
   TikTokLiveConnection,
   WebcastEvent,
 } from "tiktok-live-connector";
+import { stopAudioTranscription } from "./audio-transcriber";
 import { sendProcessWebhook } from "./n8n";
+import {
+  getActiveConnection,
+  isConnecting,
+  setActiveConnection,
+  setConnecting,
+} from "./tiktok-connection-registry";
 import { getSessionStore } from "./session-store";
 import { submitTranscript } from "./transcript-handler";
-
-const globalForConnection = globalThis as typeof globalThis & {
-  __tiktokLiveConnection?: TikTokLiveConnection | null;
-  __tiktokConnecting?: boolean;
-};
 
 function getUsername(data: {
   uniqueId?: string;
@@ -70,7 +72,7 @@ function extractCaptionText(raw: unknown): string {
 }
 
 function closeConnection(): void {
-  const connection = globalForConnection.__tiktokLiveConnection;
+  const connection = getActiveConnection();
   if (connection) {
     try {
       connection.removeAllListeners();
@@ -79,19 +81,14 @@ function closeConnection(): void {
       console.error("[tiktok] Disconnect error:", error);
     }
   }
-  globalForConnection.__tiktokLiveConnection = null;
-  globalForConnection.__tiktokConnecting = false;
+  setActiveConnection(null);
+  setConnecting(false);
 }
 
-export function getActiveConnection(): TikTokLiveConnection | null {
-  return globalForConnection.__tiktokLiveConnection ?? null;
-}
-
-export function isConnecting(): boolean {
-  return globalForConnection.__tiktokConnecting === true;
-}
+export { getActiveConnection, isConnecting };
 
 export async function disconnectTikTokLive(): Promise<void> {
+  await stopAudioTranscription();
   closeConnection();
   const store = getSessionStore();
   if (store.getSnapshot().status.connectionState === "ended") {
@@ -101,12 +98,14 @@ export async function disconnectTikTokLive(): Promise<void> {
 }
 
 async function handleStreamEnd(): Promise<void> {
+  await stopAudioTranscription();
   const store = getSessionStore();
   store.setConnectionState("ended");
   closeConnection();
 }
 
 export async function connectToTikTokLive(username: string): Promise<void> {
+  await stopAudioTranscription();
   closeConnection();
 
   const store = getSessionStore();
@@ -118,14 +117,15 @@ export async function connectToTikTokLive(username: string): Promise<void> {
     fetchRoomInfoOnConnect: true,
   });
 
-  globalForConnection.__tiktokLiveConnection = connection;
-  globalForConnection.__tiktokConnecting = true;
+  setActiveConnection(connection);
+  setConnecting(true);
 
   connection.on(ControlEvent.CONNECTED, () => {
     store.setConnectionState("connected");
   });
 
-  connection.on(ControlEvent.DISCONNECTED, () => {
+  connection.on(ControlEvent.DISCONNECTED, async () => {
+    await stopAudioTranscription();
     const current = store.getSnapshot().status.connectionState;
     if (current !== "ended") {
       store.setConnectionState("disconnected");
@@ -251,6 +251,6 @@ export async function connectToTikTokLive(username: string): Promise<void> {
     await connection.connect();
     store.setConnectionState("connected");
   } finally {
-    globalForConnection.__tiktokConnecting = false;
+    setConnecting(false);
   }
 }

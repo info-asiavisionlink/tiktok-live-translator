@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
+import { startAudioTranscription } from "@/lib/audio-transcriber";
 import { extractUsernameFromUrl } from "@/lib/extract-username";
 import { sendProcessWebhook, sendSessionStartWebhook } from "@/lib/n8n";
 import { getSessionStore } from "@/lib/session-store";
+import { isConnecting } from "@/lib/tiktok-connection-registry";
 import {
   connectToTikTokLive,
   disconnectTikTokLive,
-  isConnecting,
 } from "@/lib/tiktok-live";
 import { isValidTikTokLiveUrl } from "@/lib/validate";
 
@@ -128,6 +129,10 @@ export async function POST(request: Request) {
 
     void sendSessionStartWebhook(sessionStartPayload);
     void sendProcessWebhook(sessionStartPayload);
+
+    void startAudioTranscription(url).catch((audioError) => {
+      console.error("[audio] Failed to start audio transcription:", audioError);
+    });
 
     return NextResponse.json({
       success: true,
