@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
 import { dir } from "tmp-promise";
 import type { FfmpegCommand } from "fluent-ffmpeg";
 import { saveTranscript } from "./transcript-handler";
@@ -44,10 +43,23 @@ function getState(): AudioTranscriberState {
   return globalForAudio.__audioTranscriberState;
 }
 
-function configureFfmpeg(): void {
-  if (ffmpegStatic) {
-    ffmpeg.setFfmpegPath(ffmpegStatic);
+function resolveFfmpegPath(): string {
+  if (fs.existsSync("/usr/bin/ffmpeg")) {
+    return "/usr/bin/ffmpeg";
   }
+
+  const fromEnv = process.env.FFMPEG_PATH?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  return "ffmpeg";
+}
+
+function configureFfmpeg(): void {
+  const ffmpegPath = resolveFfmpegPath();
+  ffmpeg.setFfmpegPath(ffmpegPath);
+  console.info("[Audio] Using FFmpeg:", ffmpegPath);
 }
 
 function sleep(ms: number): Promise<void> {
