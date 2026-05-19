@@ -4,6 +4,7 @@ import ffmpeg from "fluent-ffmpeg";
 import { dir } from "tmp-promise";
 import type { FfmpegCommand } from "fluent-ffmpeg";
 import { saveTranscript } from "./transcript-handler";
+import { resolveFfmpegPath } from "./stream-probe";
 import { resolveLiveStreamUrlWithRetry } from "./tiktok-stream-url";
 import { transcribeAudioFile } from "./whisper-transcribe";
 
@@ -49,19 +50,6 @@ function getState(): AudioTranscriberState {
     };
   }
   return globalForAudio.__audioTranscriberState;
-}
-
-function resolveFfmpegPath(): string {
-  if (fs.existsSync("/usr/bin/ffmpeg")) {
-    return "/usr/bin/ffmpeg";
-  }
-
-  const fromEnv = process.env.FFMPEG_PATH?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-
-  return "ffmpeg";
 }
 
 function configureFfmpeg(): void {
@@ -266,10 +254,11 @@ async function scheduleFfmpegRestart(): Promise<void> {
       state.ffmpegCommand = null;
     }
 
-    const streamUrl =
-      (await resolveLiveStreamUrlWithRetry()) ?? state.streamUrl ?? undefined;
+    const streamUrl = await resolveLiveStreamUrlWithRetry();
     if (!streamUrl) {
-      console.error("[Audio] Error: Could not resolve stream URL for FFmpeg restart");
+      console.error(
+        "[Audio] Error: Could not resolve validated audio stream for FFmpeg restart",
+      );
       return;
     }
 
@@ -291,12 +280,26 @@ function startFfmpegSegmenter(
   outputPattern: string,
   segmentStartNumber = 0,
 ): FfmpegCommand {
+  const isHls = streamUrl.toLowerCase().includes(".m3u8");
+
+  const inputOptions = [
+    "-reconnect 1",
+    "-reconnect_streamed 1",
+    "-reconnect_delay_max 5",
+    "-user_agent",
+    "Mozilla/5.0",
+    "-analyzeduration",
+    "10000000",
+    "-probesize",
+    "10000000",
+  ];
+
+  if (isHls) {
+    inputOptions.push("-live_start_index", "0");
+  }
+
   const command = ffmpeg(streamUrl)
-    .inputOptions([
-      "-reconnect 1",
-      "-reconnect_streamed 1",
-      "-reconnect_delay_max 5",
-    ])
+    .inputOptions(inputOptions)
     .noVideo()
     .audioChannels(1)
     .audioFrequency(16000)
@@ -340,13 +343,9 @@ export async function startAudioTranscription(liveUrl: string): Promise<void> {
 
   const streamUrl = await resolveLiveStreamUrlWithRetry();
   if (!streamUrl) {
-    console.error(
-      `[Audio] Error: Could not resolve stream URL for live: ${liveUrl}`,
-    );
+    console.error("[Audio] No valid audio stream found for this live");
     return;
   }
-
-  console.info("[Audio] Stream URL found");
 
   configureFfmpeg();
 

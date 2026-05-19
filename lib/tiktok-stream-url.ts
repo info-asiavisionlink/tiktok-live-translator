@@ -1,24 +1,11 @@
 import { getActiveConnection } from "./tiktok-connection-registry";
+import { streamHasAudioStream } from "./stream-probe";
 
 const URL_IN_STRING_PATTERN =
   /https?:\/\/[^\s"'<>\\]+(?:\.m3u8|\.flv|\.mp4|pull-|\/stage\/|\/obj\/|tiktokcdn|tiktokv)[^\s"'<>\\]*/gi;
 
 function normalizeStreamUrl(url: string): string {
   return url.replace(/\\u002F/g, "/").replace(/\\\//g, "/").trim();
-}
-
-function scoreStreamUrl(url: string): number {
-  const lower = url.toLowerCase();
-  let score = 0;
-
-  if (lower.includes(".flv")) score += 50;
-  if (lower.includes(".m3u8")) score += 40;
-  if (lower.includes(".mp4")) score += 20;
-  if (lower.includes("hd") || lower.includes("origin")) score += 15;
-  if (lower.includes("pull-f5")) score += 10;
-  if (lower.includes("tiktokcdn") || lower.includes("tiktokv")) score += 5;
-
-  return score;
 }
 
 function isLikelyStreamUrl(url: string): boolean {
@@ -34,6 +21,34 @@ function isLikelyStreamUrl(url: string): boolean {
       lower.includes("tiktokcdn") ||
       lower.includes("tiktokv.com"))
   );
+}
+
+function streamUrlPriority(url: string): number {
+  const lower = url.toLowerCase();
+  if (lower.includes(".flv")) {
+    return 0;
+  }
+  if (lower.includes(".m3u8")) {
+    return 1;
+  }
+  return 2;
+}
+
+/** FLV first, then HLS (.m3u8), then other fallbacks. */
+export function rankStreamCandidateUrls(urls: string[]): string[] {
+  const unique = [
+    ...new Set(
+      urls.map(normalizeStreamUrl).filter((url) => isLikelyStreamUrl(url)),
+    ),
+  ];
+
+  return unique.sort((a, b) => {
+    const priorityDiff = streamUrlPriority(a) - streamUrlPriority(b);
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+    return b.length - a.length;
+  });
 }
 
 function collectUrlsFromValue(value: unknown, depth = 0, found: string[] = []): string[] {
@@ -75,47 +90,25 @@ function collectUrlsFromValue(value: unknown, depth = 0, found: string[] = []): 
   return found;
 }
 
-function pickBestStreamUrl(urls: string[]): string | null {
-  const unique = [...new Set(urls)];
-  if (unique.length === 0) {
-    return null;
-  }
-
-  unique.sort((a, b) => scoreStreamUrl(b) - scoreStreamUrl(a));
-  return unique[0] ?? null;
+export function extractStreamCandidateUrls(roomInfo: unknown): string[] {
+  return rankStreamCandidateUrls(collectUrlsFromValue(roomInfo));
 }
 
+/** @deprecated Use extractStreamCandidateUrls */
 export function extractStreamUrlFromRoomInfo(roomInfo: unknown): string | null {
-  const urls = collectUrlsFromValue(roomInfo);
-  return pickBestStreamUrl(urls);
+  const ranked = extractStreamCandidateUrls(roomInfo);
+  return ranked[0] ?? null;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function trySources(
-  label: string,
-  loader: () => Promise<unknown>,
-): Promise<string | null> {
-  try {
-    const data = await loader();
-    const url = extractStreamUrlFromRoomInfo(data);
-    if (url) {
-      console.info(`[Audio] Stream URL found (${label})`);
-      return url;
-    }
-  } catch (error) {
-    console.error(`[Audio] Error: ${label} failed`, error);
-  }
-  return null;
-}
-
-export async function resolveLiveStreamUrl(): Promise<string | null> {
+export async function collectAllStreamCandidateUrls(): Promise<string[]> {
   const connection = getActiveConnection();
   if (!connection) {
     console.error("[Audio] Error: No active TikTok connection");
-    return null;
+    return [];
   }
 
   const sources: Array<{ label: string; loader: () => Promise<unknown> }> = [
@@ -148,14 +141,58 @@ export async function resolveLiveStreamUrl(): Promise<string | null> {
     },
   ];
 
+  const collected: string[] = [];
+
   for (const source of sources) {
-    const url = await trySources(source.label, source.loader);
-    if (url) {
-      return url;
+    try {
+      const data = await source.loader();
+      const urls = extractStreamCandidateUrls(data);
+      if (urls.length > 0) {
+        console.info(
+          `[Audio] Found ${urls.length} candidate URL(s) from ${source.label}`,
+        );
+        collected.push(...urls);
+      }
+    } catch (error) {
+      console.error(`[Audio] Error: ${source.label} failed`, error);
     }
   }
 
+  return rankStreamCandidateUrls(collected);
+}
+
+export async function selectValidatedStreamUrl(
+  candidates: string[],
+): Promise<string | null> {
+  const ranked = rankStreamCandidateUrls(candidates);
+
+  console.log("[Audio] Candidate URLs:", ranked);
+
+  if (ranked.length === 0) {
+    console.error("[Audio] No valid audio stream found for this live");
+    return null;
+  }
+
+  for (const url of ranked) {
+    console.log("[Audio] Testing stream URL:", url);
+
+    const hasAudio = await streamHasAudioStream(url);
+    if (hasAudio) {
+      console.log("[Audio] Audio stream detected");
+      console.log("[Audio] Selected stream URL:", url);
+      return url;
+    }
+
+    console.log("[Audio] No audio stream found");
+  }
+
+  console.error("[Audio] No valid audio stream found for this live");
   return null;
+}
+
+export async function resolveLiveStreamUrl(): Promise<string | null> {
+  const candidates = await collectAllStreamCandidateUrls();
+  return selectValidatedStreamUrl(candidates);
 }
 
 export async function resolveLiveStreamUrlWithRetry(
@@ -163,19 +200,23 @@ export async function resolveLiveStreamUrlWithRetry(
   delayMs = 2000,
 ): Promise<string | null> {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const url = await resolveLiveStreamUrl();
-    if (url) {
-      return url;
+    const candidates = await collectAllStreamCandidateUrls();
+
+    if (candidates.length > 0) {
+      const selected = await selectValidatedStreamUrl(candidates);
+      if (selected) {
+        return selected;
+      }
     }
 
     if (attempt < attempts) {
       console.info(
-        `[Audio] Stream URL not ready (attempt ${attempt}/${attempts}), retrying...`,
+        `[Audio] No valid audio stream yet (attempt ${attempt}/${attempts}), retrying...`,
       );
       await sleep(delayMs);
     }
   }
 
-  console.error("[Audio] Error: Could not resolve stream URL after retries");
+  console.error("[Audio] No valid audio stream found for this live");
   return null;
 }
