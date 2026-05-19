@@ -90,14 +90,34 @@ export class SessionStore {
     };
   }
 
-  addTranscript(entry: Omit<Transcript, "id">): Transcript {
-    const transcript: Transcript = { id: createId(), ...entry };
-    this.transcripts = [transcript, ...this.transcripts].slice(0, MAX_ITEMS);
+  addTranscript(entry: Omit<Transcript, "id" | "timestamp"> & { timestamp?: string }): Transcript {
+    const transcript: Transcript = {
+      id: createId(),
+      original: entry.original,
+      translated: entry.translated,
+      detectedLanguage: entry.detectedLanguage,
+      timestamp: entry.timestamp ?? new Date().toISOString(),
+    };
+
+    this.transcripts.push(transcript);
+
+    if (this.transcripts.length > MAX_ITEMS) {
+      this.transcripts = this.transcripts.slice(-MAX_ITEMS);
+    }
+
     this.status = {
       ...this.status,
       totalTranscripts: this.transcripts.length,
     };
+
     return transcript;
+  }
+
+  getCurrentTranscript(): Transcript | null {
+    if (this.transcripts.length === 0) {
+      return null;
+    }
+    return this.transcripts[this.transcripts.length - 1] ?? null;
   }
 
   updateTranscriptTranslation(id: string, translated: string): void {
@@ -142,6 +162,7 @@ export class SessionStore {
       comments: [...this.comments],
       gifts: [...this.gifts],
       status: { ...this.status },
+      currentTranscript: this.getCurrentTranscript(),
     };
   }
 }

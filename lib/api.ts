@@ -12,6 +12,7 @@ export class ApiError extends Error {
 
 export interface SessionPollResponse extends SessionData {
   success: boolean;
+  /** @deprecated Use currentTranscript */
   transcript?: Transcript | null;
 }
 
@@ -53,7 +54,7 @@ export async function startLiveSession(url: string): Promise<StartApiResponse> {
 }
 
 export async function fetchSession(): Promise<SessionPollResponse> {
-  const response = await fetch("/api/session", {
+  const response = await fetch(`/api/session?_=${Date.now()}`, {
     method: "GET",
     headers: { Accept: "application/json" },
     cache: "no-store",

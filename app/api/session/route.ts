@@ -7,10 +7,18 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const snapshot = getSessionStore().getSnapshot();
 
+  const currentTranscript =
+    snapshot.transcripts.length > 0
+      ? snapshot.transcripts[snapshot.transcripts.length - 1]
+      : null;
+
+  console.log("[session] Returning transcript:", currentTranscript?.original);
+
   return NextResponse.json({
     success: true,
     username: snapshot.username,
-    transcript: snapshot.transcripts[0] ?? null,
+    currentTranscript,
+    transcript: currentTranscript,
     transcripts: snapshot.transcripts,
     comments: snapshot.comments,
     gifts: snapshot.gifts,

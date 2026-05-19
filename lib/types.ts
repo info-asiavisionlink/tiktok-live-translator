@@ -44,6 +44,7 @@ export interface SessionData {
   comments: Comment[];
   gifts: Gift[];
   status: SessionStatus;
+  currentTranscript: Transcript | null;
 }
 
 export interface StartApiResponse {

@@ -1,7 +1,10 @@
-import type { Transcript } from "@/lib/types";
+"use client";
+
+import { useEffect } from "react";
+import type { LiveSessionView } from "@/lib/useLiveSession";
 
 interface TranscriptPanelProps {
-  transcript: Transcript | null;
+  session: LiveSessionView;
 }
 
 function formatTimestamp(iso: string): string {
@@ -16,9 +19,20 @@ function formatTimestamp(iso: string): string {
   }
 }
 
-export function TranscriptPanel({ transcript }: TranscriptPanelProps) {
+export function TranscriptPanel({ session }: TranscriptPanelProps) {
+  const transcript = session?.currentTranscript ?? null;
+
+  useEffect(() => {
+    console.log("[UI] Rendering transcript:", transcript?.original);
+  }, [transcript?.original, transcript?.timestamp, transcript?.id]);
+
   const hasTranslation =
     transcript != null && transcript.translated.trim().length > 0;
+
+  const contentKey =
+    transcript?.id ??
+    transcript?.timestamp ??
+    "no-transcript";
 
   return (
     <section className="flex h-full flex-col rounded-2xl bg-white p-6 shadow-md shadow-slate-200/60 ring-1 ring-slate-100">
@@ -26,7 +40,7 @@ export function TranscriptPanel({ transcript }: TranscriptPanelProps) {
         Current Transcript
       </h2>
       {transcript ? (
-        <div className="mt-4 flex flex-1 flex-col gap-4">
+        <div key={contentKey} className="mt-4 flex flex-1 flex-col gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Original
@@ -34,7 +48,7 @@ export function TranscriptPanel({ transcript }: TranscriptPanelProps) {
             <p className="mt-1 text-lg leading-relaxed text-slate-800">
               {transcript.original}
             </p>
-          </div>
+            </div>
           {hasTranslation && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-rose-500">

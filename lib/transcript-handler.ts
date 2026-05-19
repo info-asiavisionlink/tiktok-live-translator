@@ -27,7 +27,7 @@ export async function saveTranscript(
     timestamp,
   });
 
-  console.info("[Audio] Transcript stored");
+  console.log("[Transcript] Stored:", trimmed);
 
   void sendProcessWebhook({
     type: "transcript",

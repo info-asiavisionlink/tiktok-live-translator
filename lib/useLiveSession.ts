@@ -24,61 +24,94 @@ const EMPTY_STATUS: SessionStatus = {
   totalGiftCoins: 0,
 };
 
+export interface LiveSessionView {
+  status: SessionStatus;
+  currentTranscript: Transcript | null;
+  transcripts: Transcript[];
+}
+
+function resolveCurrentTranscript(data: {
+  currentTranscript?: Transcript | null;
+  transcript?: Transcript | null;
+  transcripts: Transcript[];
+}): Transcript | null {
+  const fromApi = data.currentTranscript ?? data.transcript;
+  if (fromApi) {
+    return { ...fromApi };
+  }
+  if (data.transcripts.length > 0) {
+    const latest = data.transcripts[data.transcripts.length - 1];
+    return latest ? { ...latest } : null;
+  }
+  return null;
+}
+
 export function useLiveSession() {
   const [phase, setPhase] = useState<TranslationPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [currentTranscript, setCurrentTranscript] = useState<Transcript | null>(
-    null,
-  );
+  const [session, setSession] = useState<LiveSessionView>({
+    status: EMPTY_STATUS,
+    currentTranscript: null,
+    transcripts: [],
+  });
   const [comments, setComments] = useState<Comment[]>([]);
   const [gifts, setGifts] = useState<Gift[]>([]);
-  const [session, setSession] = useState<SessionStatus>(EMPTY_STATUS);
 
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isPollingRef = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const shouldPollRef = useRef(false);
 
   const stopPolling = useCallback(() => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
+    shouldPollRef.current = false;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
-    isPollingRef.current = false;
   }, []);
 
-  const syncFromServer = useCallback(async () => {
+  const poll = useCallback(async () => {
+    if (!shouldPollRef.current) {
+      return;
+    }
+
     try {
       const data = await fetchSession();
-      const latestTranscript =
-        data.transcripts[0] ?? data.transcript ?? null;
 
-      setCurrentTranscript(latestTranscript);
-      setComments(data.comments);
-      setGifts(data.gifts);
-      setSession(data.status);
+      if (data.status.connectionState === "ended") {
+        stopPolling();
+      }
+
+      const currentTranscript = resolveCurrentTranscript(data);
+
+      setSession({
+        status: { ...data.status },
+        currentTranscript,
+        transcripts: [...data.transcripts],
+      });
+      setComments([...data.comments]);
+      setGifts([...data.gifts]);
     } catch (err) {
-      if (isPollingRef.current) {
+      if (shouldPollRef.current) {
         console.error("[session] Poll failed:", err);
       }
     }
-  }, []);
+  }, [stopPolling]);
 
   const startPolling = useCallback(() => {
     stopPolling();
-    isPollingRef.current = true;
-    void syncFromServer();
-    pollIntervalRef.current = setInterval(() => {
-      void syncFromServer();
+    shouldPollRef.current = true;
+    void poll();
+    intervalRef.current = setInterval(() => {
+      void poll();
     }, POLL_INTERVAL_MS);
-  }, [stopPolling, syncFromServer]);
+  }, [poll, stopPolling]);
 
   const resetSession = useCallback(() => {
     stopPolling();
     void stopLiveSession();
-    setCurrentTranscript(null);
+    setSession({ status: EMPTY_STATUS, currentTranscript: null, transcripts: [] });
     setComments([]);
     setGifts([]);
-    setSession(EMPTY_STATUS);
     setError(null);
     setSuccessMessage(null);
     setPhase("idle");
@@ -87,20 +120,19 @@ export function useLiveSession() {
   const handleStop = useCallback(async () => {
     stopPolling();
     await stopLiveSession();
-    await syncFromServer();
+    await poll();
     setPhase("stopped");
     setSuccessMessage(null);
-  }, [stopPolling, syncFromServer]);
+  }, [poll, stopPolling]);
 
   const handleStart = useCallback(
     async (url: string) => {
       setPhase("loading");
       setError(null);
       setSuccessMessage(null);
-      setCurrentTranscript(null);
+      setSession({ status: EMPTY_STATUS, currentTranscript: null, transcripts: [] });
       setComments([]);
       setGifts([]);
-      setSession(EMPTY_STATUS);
       stopPolling();
 
       try {
@@ -134,10 +166,9 @@ export function useLiveSession() {
     phase,
     error,
     successMessage,
-    currentTranscript,
+    session,
     comments,
     gifts,
-    session,
     handleStart,
     handleStop,
     resetSession,

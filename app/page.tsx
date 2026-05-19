@@ -18,10 +18,9 @@ export default function Home() {
     phase,
     error,
     successMessage,
-    currentTranscript,
+    session,
     comments,
     gifts,
-    session,
     handleStart,
     handleStop,
     resetSession,
@@ -119,13 +118,20 @@ export default function Home() {
 
         {showDashboard && (
           <div className="mt-12 grid gap-6 lg:grid-cols-2 lg:gap-8">
-            <TranscriptPanel transcript={currentTranscript} />
-            <StatusPanel status={session} />
+            <TranscriptPanel
+              key={
+                session.currentTranscript?.id ??
+                session.currentTranscript?.timestamp ??
+                "no-transcript"
+              }
+              session={session}
+            />
+            <StatusPanel status={session.status} />
             <CommentPanel comments={comments} />
             <GiftPanel
               gifts={gifts}
-              totalGiftCount={session.totalGiftCount}
-              totalGiftCoins={session.totalGiftCoins}
+              totalGiftCount={session.status.totalGiftCount}
+              totalGiftCoins={session.status.totalGiftCoins}
             />
           </div>
         )}
