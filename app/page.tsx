@@ -1,65 +1,132 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { CommentPanel } from "@/components/CommentPanel";
+import { GiftPanel } from "@/components/GiftPanel";
+import { StatusPanel } from "@/components/StatusPanel";
+import { TranscriptPanel } from "@/components/TranscriptPanel";
+import { URLForm } from "@/components/URLForm";
+import { useLiveSession } from "@/lib/useLiveSession";
+import { isValidTikTokLiveUrl, normalizeTikTokUrl } from "@/lib/validate";
 
 export default function Home() {
+  const [url, setUrl] = useState("");
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const {
+    phase,
+    error,
+    successMessage,
+    currentTranscript,
+    comments,
+    gifts,
+    session,
+    handleStart,
+    resetSession,
+  } = useLiveSession();
+
+  const isActive = phase === "active";
+  const isLoading = phase === "loading";
+  const displayError = validationError ?? error;
+
+  const onSubmit = () => {
+    setValidationError(null);
+
+    if (!isValidTikTokLiveUrl(url)) {
+      setValidationError(
+        "Please enter a valid TikTok Live URL (e.g. https://www.tiktok.com/@username/live).",
+      );
+      return;
+    }
+
+    void handleStart(normalizeTikTokUrl(url));
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-full bg-gradient-to-b from-rose-50 via-white to-slate-50">
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
+        <header className="text-center">
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+            TikTok Live Translator
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="mx-auto mt-4 max-w-2xl text-lg text-slate-600">
+            Paste a TikTok Live URL to start real-time transcription, translation,
+            comments, and gifts powered by your n8n workflow.
           </p>
+        </header>
+
+        <div className="mt-10">
+          <URLForm
+            url={url}
+            loading={isLoading}
+            disabled={isActive}
+            onUrlChange={setUrl}
+            onSubmit={onSubmit}
+          />
+
+          {isLoading && (
+            <div
+              role="status"
+              className="mx-auto mt-6 flex max-w-2xl items-center justify-center gap-3 rounded-2xl border border-rose-100 bg-white px-5 py-4 text-slate-700 shadow-sm"
+            >
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-rose-200 border-t-rose-500" />
+              Connecting to TikTok Live and starting translation…
+            </div>
+          )}
+
+          {displayError && (
+            <div
+              role="alert"
+              className="mx-auto mt-6 max-w-2xl rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-800"
+            >
+              <p className="font-semibold">Something went wrong</p>
+              <p className="mt-1 text-sm">{displayError}</p>
+              {phase === "error" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setValidationError(null);
+                    resetSession();
+                  }}
+                  className="mt-3 text-sm font-semibold text-red-700 underline underline-offset-2 hover:text-red-900"
+                >
+                  Try again
+                </button>
+              )}
+            </div>
+          )}
+
+          {successMessage && isActive && (
+            <div
+              role="status"
+              className="mx-auto mt-6 max-w-2xl rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-900"
+            >
+              <p className="font-semibold">Session active</p>
+              <p className="mt-1 text-sm">{successMessage}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setUrl("");
+                  resetSession();
+                }}
+                className="mt-3 text-sm font-semibold text-emerald-800 underline underline-offset-2 hover:text-emerald-950"
+              >
+                End session
+              </button>
+            </div>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+
+        {isActive && (
+          <div className="mt-12 grid gap-6 lg:grid-cols-2 lg:gap-8">
+            <TranscriptPanel transcript={currentTranscript} />
+            <StatusPanel status={session} />
+            <CommentPanel comments={comments} />
+            <GiftPanel gifts={gifts} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+
