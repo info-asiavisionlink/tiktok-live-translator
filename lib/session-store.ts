@@ -1,7 +1,6 @@
 import type {
   Comment,
   Gift,
-  MemberEntry,
   SessionData,
   SessionStatus,
   Transcript,
@@ -20,9 +19,15 @@ function emptyStatus(): SessionStatus {
     totalTranscripts: 0,
     totalComments: 0,
     totalGifts: 0,
-    totalMembers: 0,
-    totalLikes: 0,
+    totalGiftCoins: 0,
   };
+}
+
+function giftCoinTotal(gifts: Gift[]): number {
+  return gifts.reduce(
+    (sum, gift) => sum + gift.count * Math.max(0, gift.diamondCount),
+    0,
+  );
 }
 
 export class SessionStore {
@@ -30,7 +35,6 @@ export class SessionStore {
   private transcripts: Transcript[] = [];
   private comments: Comment[] = [];
   private gifts: Gift[] = [];
-  private members: MemberEntry[] = [];
   private status: SessionStatus = emptyStatus();
 
   reset(): void {
@@ -38,7 +42,6 @@ export class SessionStore {
     this.transcripts = [];
     this.comments = [];
     this.gifts = [];
-    this.members = [];
     this.status = emptyStatus();
   }
 
@@ -66,6 +69,12 @@ export class SessionStore {
     return transcript;
   }
 
+  updateTranscriptTranslation(id: string, translated: string): void {
+    this.transcripts = this.transcripts.map((transcript) =>
+      transcript.id === id ? { ...transcript, translated } : transcript,
+    );
+  }
+
   addComment(entry: Omit<Comment, "id">): Comment {
     const comment: Comment = { id: createId(), ...entry };
     this.comments = [comment, ...this.comments].slice(0, MAX_ITEMS);
@@ -76,41 +85,15 @@ export class SessionStore {
     return comment;
   }
 
-  updateCommentTranslation(id: string, translated: string): void {
-    this.comments = this.comments.map((comment) =>
-      comment.id === id ? { ...comment, translated } : comment,
-    );
-  }
-
   addGift(entry: Omit<Gift, "id">): Gift {
     const gift: Gift = { id: createId(), ...entry };
     this.gifts = [gift, ...this.gifts].slice(0, MAX_ITEMS);
     this.status = {
       ...this.status,
       totalGifts: this.gifts.length,
+      totalGiftCoins: giftCoinTotal(this.gifts),
     };
     return gift;
-  }
-
-  addMember(username: string): MemberEntry {
-    const member: MemberEntry = {
-      id: createId(),
-      username,
-      timestamp: new Date().toISOString(),
-    };
-    this.members = [member, ...this.members].slice(0, MAX_ITEMS);
-    this.status = {
-      ...this.status,
-      totalMembers: this.members.length,
-    };
-    return member;
-  }
-
-  addLike(count: number): void {
-    this.status = {
-      ...this.status,
-      totalLikes: this.status.totalLikes + count,
-    };
   }
 
   getSnapshot(): SessionData {
@@ -119,7 +102,6 @@ export class SessionStore {
       transcripts: [...this.transcripts],
       comments: [...this.comments],
       gifts: [...this.gifts],
-      members: [...this.members],
       status: { ...this.status },
     };
   }

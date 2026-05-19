@@ -4,7 +4,7 @@ type N8nPayload = Record<string, unknown>;
 export const DEV_N8N_WEBHOOK_URL =
   "https://nextasia.app.n8n.cloud/webhook/8a64212f-6788-4811-9e79-04e304162749";
 
-/** Development fallback for process webhook (comment, gift, member, transcript, session_start) */
+/** Development fallback for process webhook (session_start, comment, gift, transcript) */
 export const DEV_N8N_PROCESS_WEBHOOK_URL =
   "https://nextasia.app.n8n.cloud/webhook/8a64212f-6788-4811-9e79-04e304162749";
 
@@ -34,6 +34,7 @@ async function postToWebhook(
   webhookUrl: string,
   payload: N8nPayload,
   label: "session" | "process",
+  parseJsonResponse: boolean,
 ): Promise<Record<string, unknown> | null> {
   try {
     const response = await fetch(webhookUrl, {
@@ -45,41 +46,47 @@ async function postToWebhook(
       body: JSON.stringify(payload),
     });
 
-    const contentType = response.headers.get("content-type") ?? "";
-    if (response.ok && contentType.includes("application/json")) {
-      return (await response.json()) as Record<string, unknown>;
-    }
-
     if (!response.ok) {
       console.error(
         `[n8n:${label}] Webhook returned ${response.status} ${response.statusText}`,
         { type: payload.type },
       );
+      return null;
     }
+
+    if (!parseJsonResponse) {
+      return { success: true };
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      return (await response.json()) as Record<string, unknown>;
+    }
+
+    return { success: true };
   } catch (error) {
     console.error(`[n8n:${label}] Webhook request failed:`, error, {
       type: payload.type,
     });
+    return null;
   }
-
-  return null;
 }
 
 /** Session start only — NEXT_PUBLIC_N8N_WEBHOOK_URL */
 export async function sendSessionStartWebhook(
   payload: N8nPayload,
-): Promise<Record<string, unknown> | null> {
+): Promise<void> {
   const webhookUrl = getSessionStartWebhookUrl();
   if (!webhookUrl) {
     console.error(
       "[n8n:session] Webhook URL is not configured. Set NEXT_PUBLIC_N8N_WEBHOOK_URL.",
     );
-    return null;
+    return;
   }
-  return postToWebhook(webhookUrl, payload, "session");
+  await postToWebhook(webhookUrl, payload, "session", false);
 }
 
-/** All event posts — NEXT_PUBLIC_N8N_PROCESS_WEBHOOK_URL */
+/** Event processing — NEXT_PUBLIC_N8N_PROCESS_WEBHOOK_URL */
 export async function sendProcessWebhook(
   payload: N8nPayload,
 ): Promise<Record<string, unknown> | null> {
@@ -90,5 +97,9 @@ export async function sendProcessWebhook(
     );
     return null;
   }
-  return postToWebhook(webhookUrl, payload, "process");
+
+  const eventType = payload.type;
+  const parseJsonResponse = eventType === "transcript";
+
+  return postToWebhook(webhookUrl, payload, "process", parseJsonResponse);
 }

@@ -18,8 +18,7 @@ const EMPTY_STATUS: SessionStatus = {
   totalTranscripts: 0,
   totalComments: 0,
   totalGifts: 0,
-  totalMembers: 0,
-  totalLikes: 0,
+  totalGiftCoins: 0,
 };
 
 export function useLiveSession() {

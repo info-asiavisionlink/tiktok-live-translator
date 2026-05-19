@@ -14,7 +14,6 @@ export async function GET() {
     transcripts: snapshot.transcripts,
     comments: snapshot.comments,
     gifts: snapshot.gifts,
-    members: snapshot.members,
     status: snapshot.status,
   });
 }

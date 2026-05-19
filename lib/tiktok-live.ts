@@ -5,6 +5,7 @@ import {
 } from "tiktok-live-connector";
 import { sendProcessWebhook } from "./n8n";
 import { getSessionStore } from "./session-store";
+import { submitTranscript } from "./transcript-handler";
 
 const globalForConnection = globalThis as typeof globalThis & {
   __tiktokLiveConnection?: TikTokLiveConnection | null;
@@ -25,7 +26,7 @@ function getUsername(data: {
 
 function getGiftName(data: {
   giftName?: string;
-  extendedGiftInfo?: { name?: string };
+  extendedGiftInfo?: { name?: string; diamond_count?: number };
   giftId?: number | string;
 }): string {
   return (
@@ -33,6 +34,39 @@ function getGiftName(data: {
     data.extendedGiftInfo?.name ??
     (data.giftId != null ? `Gift #${data.giftId}` : "Gift")
   );
+}
+
+function getDiamondCount(data: {
+  diamondCount?: number;
+  extendedGiftInfo?: { diamond_count?: number; diamondCount?: number };
+}): number {
+  if (typeof data.diamondCount === "number" && data.diamondCount >= 0) {
+    return data.diamondCount;
+  }
+  const fromInfo = data.extendedGiftInfo;
+  if (typeof fromInfo?.diamond_count === "number" && fromInfo.diamond_count >= 0) {
+    return fromInfo.diamond_count;
+  }
+  if (typeof fromInfo?.diamondCount === "number" && fromInfo.diamondCount >= 0) {
+    return fromInfo.diamondCount;
+  }
+  return 0;
+}
+
+function extractCaptionText(raw: unknown): string {
+  const data = raw as {
+    content?: string;
+    caption?: string;
+    text?: string;
+    captionText?: string;
+  };
+  const candidates = [data.content, data.caption, data.text, data.captionText];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
 }
 
 export function getActiveConnection(): TikTokLiveConnection | null {
@@ -100,10 +134,9 @@ export async function connectToTikTokLive(username: string): Promise<void> {
       typeof data.comment === "string" ? data.comment : String(data.comment ?? "");
     const timestamp = new Date().toISOString();
 
-    const comment = store.addComment({
+    store.addComment({
       username: chatUsername,
       original: text,
-      translated: text,
       timestamp,
     });
 
@@ -112,47 +145,6 @@ export async function connectToTikTokLive(username: string): Promise<void> {
       username: chatUsername,
       text,
       timestamp,
-    }).then((response) => {
-      const translated =
-        typeof response?.translated === "string"
-          ? response.translated
-          : typeof response?.translation === "string"
-            ? response.translation
-            : null;
-
-      if (translated) {
-        store.updateCommentTranslation(comment.id, translated);
-      }
-
-      if (response?.transcript && typeof response.transcript === "object") {
-        const t = response.transcript as Record<string, unknown>;
-        if (
-          typeof t.original === "string" &&
-          typeof t.translated === "string"
-        ) {
-          const transcriptTimestamp =
-            typeof t.timestamp === "string" ? t.timestamp : timestamp;
-          const detectedLanguage =
-            typeof t.detectedLanguage === "string"
-              ? t.detectedLanguage
-              : "unknown";
-
-          store.addTranscript({
-            original: t.original,
-            translated: t.translated,
-            detectedLanguage,
-            timestamp: transcriptTimestamp,
-          });
-
-          void sendProcessWebhook({
-            type: "transcript",
-            original: t.original,
-            translated: t.translated,
-            detectedLanguage,
-            timestamp: transcriptTimestamp,
-          });
-        }
-      }
     });
   });
 
@@ -161,11 +153,12 @@ export async function connectToTikTokLive(username: string): Promise<void> {
       uniqueId?: string;
       user?: { uniqueId?: string; nickname?: string };
       giftName?: string;
-      extendedGiftInfo?: { name?: string };
+      extendedGiftInfo?: { name?: string; diamond_count?: number; diamondCount?: number };
       giftId?: number | string;
       giftType?: number;
       repeatEnd?: boolean;
       repeatCount?: number;
+      diamondCount?: number;
     };
 
     if (data.giftType === 1 && !data.repeatEnd) {
@@ -174,16 +167,21 @@ export async function connectToTikTokLive(username: string): Promise<void> {
 
     const giftUsername = getUsername(data);
     const giftName = getGiftName(data);
-    const count =
+    const repeatCount =
       typeof data.repeatCount === "number" && data.repeatCount > 0
         ? data.repeatCount
         : 1;
+    const diamondCount = getDiamondCount(data);
+    const giftId = data.giftId ?? null;
     const timestamp = new Date().toISOString();
 
     store.addGift({
       username: giftUsername,
       giftName,
-      count,
+      count: repeatCount,
+      repeatCount,
+      diamondCount,
+      giftId,
       timestamp,
     });
 
@@ -191,29 +189,19 @@ export async function connectToTikTokLive(username: string): Promise<void> {
       type: "gift",
       username: giftUsername,
       giftName,
-      count,
+      count: repeatCount,
+      repeatCount,
+      diamondCount,
+      giftId,
       timestamp,
     });
   });
 
-  connection.on(WebcastEvent.MEMBER, (data) => {
-    const memberUsername = getUsername(data);
-    store.addMember(memberUsername);
-
-    void sendProcessWebhook({
-      type: "member",
-      username: memberUsername,
-      timestamp: new Date().toISOString(),
-    });
-  });
-
-  connection.on(WebcastEvent.LIKE, (raw) => {
-    const data = raw as { likeCount?: number };
-    const likeCount =
-      typeof data.likeCount === "number" && data.likeCount > 0
-        ? data.likeCount
-        : 1;
-    store.addLike(likeCount);
+  connection.on(WebcastEvent.CAPTION_MESSAGE, (raw) => {
+    const text = extractCaptionText(raw);
+    if (text) {
+      void submitTranscript(text);
+    }
   });
 
   try {

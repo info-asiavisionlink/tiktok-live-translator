@@ -22,9 +22,8 @@ export function CommentPanel({ comments }: CommentPanelProps) {
               <p className="text-sm font-semibold text-rose-600">
                 @{comment.username}
               </p>
-              <p className="mt-2 text-sm text-slate-600">{comment.original}</p>
-              <p className="mt-1 text-sm font-medium text-slate-900">
-                {comment.translated}
+              <p className="mt-2 text-sm leading-relaxed text-slate-800">
+                {comment.original}
               </p>
             </li>
           ))
