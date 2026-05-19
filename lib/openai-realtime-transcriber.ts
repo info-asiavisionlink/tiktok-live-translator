@@ -4,11 +4,11 @@ import {
   setPartialTranscript,
 } from "./realtime-transcript-handler";
 
-const REALTIME_MODEL = "gpt-realtime-whisper";
-const REALTIME_WS_URL = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
+const REALTIME_TRANSCRIPTION_MODEL = "gpt-realtime-whisper";
+const REALTIME_GA_WS_BASE = "wss://api.openai.com/v1/realtime";
 const CONNECT_TIMEOUT_MS = 15_000;
 
-/** OpenAI Realtime transcription requires 24 kHz PCM16 mono. */
+/** OpenAI Realtime GA transcription requires 24 kHz PCM16 mono. */
 export const REALTIME_PCM_SAMPLE_RATE = 24_000;
 
 type RealtimeEvent = {
@@ -16,12 +16,31 @@ type RealtimeEvent = {
   delta?: string;
   transcript?: string;
   item_id?: string;
-  error?: { message?: string };
+  error?: {
+    type?: string;
+    message?: string;
+    code?: string;
+  };
 };
 
 export interface RealtimeTranscriberCallbacks {
   onConnected?: () => void;
   onDisconnected?: () => void;
+}
+
+function buildRealtimeWebSocketUrl(): string {
+  const url = new URL(REALTIME_GA_WS_BASE);
+  url.searchParams.set("model", REALTIME_TRANSCRIPTION_MODEL);
+  return url.toString();
+}
+
+function isSessionReadyEvent(type: string): boolean {
+  return (
+    type === "session.created" ||
+    type === "session.updated" ||
+    type === "transcription_session.created" ||
+    type === "transcription_session.updated"
+  );
 }
 
 export class OpenAiRealtimeTranscriber {
@@ -30,6 +49,7 @@ export class OpenAiRealtimeTranscriber {
   private closed = false;
   private readonly partialByItem = new Map<string, string>();
   private activeItemId: string | null = null;
+  private rejectConnect: ((error: Error) => void) | null = null;
 
   constructor(private readonly callbacks: RealtimeTranscriberCallbacks = {}) {}
 
@@ -38,6 +58,8 @@ export class OpenAiRealtimeTranscriber {
     if (!apiKey) {
       throw new Error("OPENAI_API_KEY is not configured");
     }
+
+    const wsUrl = buildRealtimeWebSocketUrl();
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -48,6 +70,7 @@ export class OpenAiRealtimeTranscriber {
         }
         settled = true;
         clearTimeout(timeout);
+        this.rejectConnect = null;
         if (!this.connected) {
           this.connected = true;
           console.log("[Realtime] Connected");
@@ -56,28 +79,36 @@ export class OpenAiRealtimeTranscriber {
         resolve();
       };
 
-      const timeout = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          reject(new Error("Realtime connection timed out"));
+      const failConnect = (error: Error) => {
+        if (settled) {
+          return;
         }
+        settled = true;
+        clearTimeout(timeout);
+        this.rejectConnect = null;
+        reject(error);
+      };
+
+      this.rejectConnect = failConnect;
+
+      const timeout = setTimeout(() => {
+        failConnect(new Error("Realtime connection timed out"));
       }, CONNECT_TIMEOUT_MS);
 
-      this.ws = new WebSocket(REALTIME_WS_URL, {
+      this.ws = new WebSocket(wsUrl, {
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          "OpenAI-Beta": "realtime=v1",
         },
       });
 
       this.ws.on("open", () => {
-        this.sendSessionUpdate();
+        this.sendTranscriptionSessionUpdate();
       });
 
       this.ws.on("message", (data) => {
         try {
           const event = JSON.parse(data.toString()) as RealtimeEvent;
-          this.handleEvent(event, markReady);
+          this.handleEvent(event, markReady, failConnect);
         } catch (error) {
           console.error("[Realtime] Error: Failed to parse event", error);
         }
@@ -85,12 +116,20 @@ export class OpenAiRealtimeTranscriber {
 
       this.ws.on("error", (error) => {
         clearTimeout(timeout);
-        console.error("[Realtime] Error:", error);
-        reject(error);
+        const message =
+          error instanceof Error ? error.message : "WebSocket error";
+        console.error("[Realtime] Error:", message);
+        failConnect(error instanceof Error ? error : new Error(message));
       });
 
-      this.ws.on("close", () => {
+      this.ws.on("close", (code, reason) => {
         this.connected = false;
+        if (!this.closed && !settled) {
+          const reasonText = reason.toString() || "connection closed";
+          failConnect(
+            new Error(`Realtime WebSocket closed (${code}): ${reasonText}`),
+          );
+        }
         if (!this.closed) {
           console.log("[Realtime] Disconnected");
         }
@@ -99,7 +138,8 @@ export class OpenAiRealtimeTranscriber {
     });
   }
 
-  private sendSessionUpdate(): void {
+  /** GA Realtime API: transcription-only session configuration. */
+  private sendTranscriptionSessionUpdate(): void {
     this.send({
       type: "session.update",
       session: {
@@ -111,7 +151,7 @@ export class OpenAiRealtimeTranscriber {
               rate: REALTIME_PCM_SAMPLE_RATE,
             },
             transcription: {
-              model: REALTIME_MODEL,
+              model: REALTIME_TRANSCRIPTION_MODEL,
             },
             turn_detection: {
               type: "server_vad",
@@ -132,19 +172,23 @@ export class OpenAiRealtimeTranscriber {
     this.ws.send(JSON.stringify(payload));
   }
 
-  private handleEvent(event: RealtimeEvent, onReady: () => void): void {
+  private handleEvent(
+    event: RealtimeEvent,
+    onReady: () => void,
+    onFatalError: (error: Error) => void,
+  ): void {
     const type = event.type ?? "";
 
     if (type === "error") {
-      console.error("[Realtime] Error:", event.error?.message ?? "Unknown error");
+      const message = event.error?.message ?? "Unknown Realtime API error";
+      console.error("[Realtime] Error:", message);
+      if (!this.connected) {
+        onFatalError(new Error(message));
+      }
       return;
     }
 
-    if (
-      type === "session.created" ||
-      type === "session.updated" ||
-      type === "transcription_session.updated"
-    ) {
+    if (isSessionReadyEvent(type)) {
       onReady();
       return;
     }
@@ -199,6 +243,7 @@ export class OpenAiRealtimeTranscriber {
     this.connected = false;
     this.partialByItem.clear();
     this.activeItemId = null;
+    this.rejectConnect = null;
     setPartialTranscript("");
 
     if (this.ws) {
