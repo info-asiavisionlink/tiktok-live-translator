@@ -4,7 +4,7 @@ import {
   setPartialTranscript,
 } from "./realtime-transcript-handler";
 
-const REALTIME_SESSION_MODEL = "gpt-4o-realtime-preview";
+const REALTIME_SESSION_MODEL = "gpt-realtime-1.5";
 const REALTIME_TRANSCRIPTION_MODEL = "gpt-realtime-whisper";
 const REALTIME_GA_WS_BASE = "wss://api.openai.com/v1/realtime";
 const CONNECT_TIMEOUT_MS = 15_000;
