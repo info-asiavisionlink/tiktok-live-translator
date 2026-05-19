@@ -4,6 +4,7 @@ import {
   setPartialTranscript,
 } from "./realtime-transcript-handler";
 
+const REALTIME_SESSION_MODEL = "gpt-4o-realtime-preview";
 const REALTIME_TRANSCRIPTION_MODEL = "gpt-realtime-whisper";
 const REALTIME_GA_WS_BASE = "wss://api.openai.com/v1/realtime";
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -30,7 +31,7 @@ export interface RealtimeTranscriberCallbacks {
 
 function buildRealtimeWebSocketUrl(): string {
   const url = new URL(REALTIME_GA_WS_BASE);
-  url.searchParams.set("model", REALTIME_TRANSCRIPTION_MODEL);
+  url.searchParams.set("model", REALTIME_SESSION_MODEL);
   return url.toString();
 }
 
@@ -60,6 +61,8 @@ export class OpenAiRealtimeTranscriber {
     }
 
     const wsUrl = buildRealtimeWebSocketUrl();
+    console.log("[Realtime] Using session model:", REALTIME_SESSION_MODEL);
+    console.log("[Realtime] Using transcription model:", REALTIME_TRANSCRIPTION_MODEL);
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -138,12 +141,12 @@ export class OpenAiRealtimeTranscriber {
     });
   }
 
-  /** GA Realtime API: transcription-only session configuration. */
+  /** GA Realtime API: realtime session + dedicated input transcription model. */
   private sendTranscriptionSessionUpdate(): void {
     this.send({
       type: "session.update",
       session: {
-        type: "transcription",
+        modalities: ["audio", "text"],
         audio: {
           input: {
             format: {
