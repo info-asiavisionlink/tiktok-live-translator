@@ -17,6 +17,9 @@ function formatTimestamp(iso: string): string {
 }
 
 export function TranscriptPanel({ transcript }: TranscriptPanelProps) {
+  const hasTranslation =
+    transcript != null && transcript.translated.trim().length > 0;
+
   return (
     <section className="flex h-full flex-col rounded-2xl bg-white p-6 shadow-md shadow-slate-200/60 ring-1 ring-slate-100">
       <h2 className="text-xl font-bold tracking-tight text-slate-900">
@@ -32,6 +35,16 @@ export function TranscriptPanel({ transcript }: TranscriptPanelProps) {
               {transcript.original}
             </p>
           </div>
+          {hasTranslation && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-rose-500">
+                Translated
+              </p>
+              <p className="mt-1 text-lg font-medium leading-relaxed text-slate-900">
+                {transcript.translated}
+              </p>
+            </div>
+          )}
           <div className="mt-auto border-t border-slate-100 pt-4 text-sm">
             <p className="text-slate-400">Timestamp</p>
             <p className="font-semibold text-slate-700">

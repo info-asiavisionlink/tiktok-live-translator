@@ -1,4 +1,5 @@
 import { sendProcessWebhook } from "./n8n";
+import { translateToJapanese } from "./openai-translate";
 import { getSessionStore } from "./session-store";
 
 export async function submitTranscript(text: string): Promise<void> {
@@ -7,12 +8,12 @@ export async function submitTranscript(text: string): Promise<void> {
     return;
   }
 
-  const store = getSessionStore();
+  const translated = await translateToJapanese(trimmed);
   const timestamp = new Date().toISOString();
 
-  store.addTranscript({
+  getSessionStore().addTranscript({
     original: trimmed,
-    translated: "",
+    translated,
     detectedLanguage: "unknown",
     timestamp,
   });
