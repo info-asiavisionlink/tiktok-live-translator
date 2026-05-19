@@ -13,11 +13,14 @@ import type {
 const POLL_INTERVAL_MS = 2000;
 
 const EMPTY_STATUS: SessionStatus = {
-  connected: false,
+  connectionState: "idle",
   username: null,
+  viewerCount: 0,
+  totalLikes: 0,
+  followCount: 0,
   totalTranscripts: 0,
   totalComments: 0,
-  totalGifts: 0,
+  totalGiftCount: 0,
   totalGiftCoins: 0,
 };
 
@@ -33,13 +36,14 @@ export function useLiveSession() {
   const [session, setSession] = useState<SessionStatus>(EMPTY_STATUS);
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isActiveRef = useRef(false);
+  const isPollingRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    isPollingRef.current = false;
   }, []);
 
   const syncFromServer = useCallback(async () => {
@@ -53,7 +57,7 @@ export function useLiveSession() {
       setGifts(data.gifts);
       setSession(data.status);
     } catch (err) {
-      if (isActiveRef.current) {
+      if (isPollingRef.current) {
         console.error("[session] Poll failed:", err);
       }
     }
@@ -61,6 +65,7 @@ export function useLiveSession() {
 
   const startPolling = useCallback(() => {
     stopPolling();
+    isPollingRef.current = true;
     void syncFromServer();
     pollIntervalRef.current = setInterval(() => {
       void syncFromServer();
@@ -68,7 +73,6 @@ export function useLiveSession() {
   }, [stopPolling, syncFromServer]);
 
   const resetSession = useCallback(() => {
-    isActiveRef.current = false;
     stopPolling();
     void stopLiveSession();
     setCurrentTranscript(null);
@@ -80,6 +84,14 @@ export function useLiveSession() {
     setPhase("idle");
   }, [stopPolling]);
 
+  const handleStop = useCallback(async () => {
+    stopPolling();
+    await stopLiveSession();
+    await syncFromServer();
+    setPhase("stopped");
+    setSuccessMessage(null);
+  }, [stopPolling, syncFromServer]);
+
   const handleStart = useCallback(
     async (url: string) => {
       setPhase("loading");
@@ -90,11 +102,9 @@ export function useLiveSession() {
       setGifts([]);
       setSession(EMPTY_STATUS);
       stopPolling();
-      isActiveRef.current = false;
 
       try {
         const result = await startLiveSession(url);
-        isActiveRef.current = true;
         setPhase("active");
         setSuccessMessage(
           `@${result.username} のライブに接続しました。リアルタイムでイベントを表示しています。`,
@@ -116,7 +126,6 @@ export function useLiveSession() {
 
   useEffect(() => {
     return () => {
-      isActiveRef.current = false;
       stopPolling();
     };
   }, [stopPolling]);
@@ -130,6 +139,7 @@ export function useLiveSession() {
     gifts,
     session,
     handleStart,
+    handleStop,
     resetSession,
   };
 }

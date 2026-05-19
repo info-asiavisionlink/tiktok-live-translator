@@ -1,17 +1,21 @@
+import { calculateGiftCoins } from "@/lib/session-store";
 import type { Gift } from "@/lib/types";
 
 interface GiftPanelProps {
   gifts: Gift[];
+  totalGiftCount: number;
+  totalGiftCoins: number;
 }
 
 function giftCoins(gift: Gift): number {
-  return gift.count * Math.max(0, gift.diamondCount);
+  return calculateGiftCoins(gift.diamondCount, gift.repeatCount, gift.count);
 }
 
-export function GiftPanel({ gifts }: GiftPanelProps) {
-  const totalGifts = gifts.reduce((sum, gift) => sum + gift.count, 0);
-  const totalCoins = gifts.reduce((sum, gift) => sum + giftCoins(gift), 0);
-
+export function GiftPanel({
+  gifts,
+  totalGiftCount,
+  totalGiftCoins,
+}: GiftPanelProps) {
   return (
     <section className="flex h-full max-h-[480px] flex-col rounded-2xl bg-white p-6 shadow-md shadow-slate-200/60 ring-1 ring-slate-100">
       <h2 className="text-xl font-bold tracking-tight text-slate-900">Gifts</h2>
@@ -19,11 +23,11 @@ export function GiftPanel({ gifts }: GiftPanelProps) {
       <div className="mt-4 flex gap-4 rounded-xl bg-rose-50/80 px-4 py-3 text-sm ring-1 ring-rose-100">
         <p className="text-slate-600">
           <span className="font-semibold text-slate-900">Total Gifts:</span>{" "}
-          {totalGifts}
+          {totalGiftCount.toLocaleString()}
         </p>
         <p className="text-slate-600">
           <span className="font-semibold text-slate-900">Total Coins:</span>{" "}
-          {totalCoins}
+          {totalGiftCoins.toLocaleString()}
         </p>
       </div>
 
@@ -45,7 +49,7 @@ export function GiftPanel({ gifts }: GiftPanelProps) {
                   <p className="text-base font-medium text-slate-900">
                     {gift.giftName} × {gift.count}{" "}
                     <span className="text-sm font-normal text-slate-500">
-                      ({coins} coins)
+                      ({coins.toLocaleString()} coins)
                     </span>
                   </p>
                 </div>

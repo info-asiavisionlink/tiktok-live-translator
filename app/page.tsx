@@ -12,6 +12,7 @@ import { isValidTikTokLiveUrl, normalizeTikTokUrl } from "@/lib/validate";
 export default function Home() {
   const [url, setUrl] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
 
   const {
     phase,
@@ -22,11 +23,13 @@ export default function Home() {
     gifts,
     session,
     handleStart,
+    handleStop,
     resetSession,
   } = useLiveSession();
 
-  const isActive = phase === "active";
   const isLoading = phase === "loading";
+  const showDashboard = phase === "active" || phase === "stopped";
+  const showStop = phase === "active";
   const displayError = validationError ?? error;
 
   const onSubmit = () => {
@@ -42,6 +45,11 @@ export default function Home() {
     void handleStart(normalizeTikTokUrl(url));
   };
 
+  const onStop = () => {
+    setStopping(true);
+    void handleStop().finally(() => setStopping(false));
+  };
+
   return (
     <div className="min-h-full bg-gradient-to-b from-rose-50 via-white to-slate-50">
       <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
@@ -50,8 +58,7 @@ export default function Home() {
             TikTok Live Translator
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-slate-600">
-            TikTok Live URL を入力すると、ライブのコメント・ギフトをリアルタイムで取得し、n8n
-            経由で翻訳・保存します。
+            TikTok Live のコメント・ギフト・配信者の発話・視聴者数などをリアルタイムで表示します。
           </p>
         </header>
 
@@ -59,9 +66,12 @@ export default function Home() {
           <URLForm
             url={url}
             loading={isLoading}
-            disabled={isActive}
+            stopping={stopping}
+            showStop={showStop}
+            disabled={phase === "active"}
             onUrlChange={setUrl}
             onSubmit={onSubmit}
+            onStop={onStop}
           />
 
           {isLoading && (
@@ -96,33 +106,27 @@ export default function Home() {
             </div>
           )}
 
-          {successMessage && isActive && (
+          {successMessage && phase === "active" && (
             <div
               role="status"
               className="mx-auto mt-6 max-w-2xl rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-900"
             >
               <p className="font-semibold">セッション接続中</p>
               <p className="mt-1 text-sm">{successMessage}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setUrl("");
-                  resetSession();
-                }}
-                className="mt-3 text-sm font-semibold text-emerald-800 underline underline-offset-2 hover:text-emerald-950"
-              >
-                セッションを終了
-              </button>
             </div>
           )}
         </div>
 
-        {isActive && (
+        {showDashboard && (
           <div className="mt-12 grid gap-6 lg:grid-cols-2 lg:gap-8">
             <TranscriptPanel transcript={currentTranscript} />
             <StatusPanel status={session} />
             <CommentPanel comments={comments} />
-            <GiftPanel gifts={gifts} />
+            <GiftPanel
+              gifts={gifts}
+              totalGiftCount={session.totalGiftCount}
+              totalGiftCoins={session.totalGiftCoins}
+            />
           </div>
         )}
       </div>

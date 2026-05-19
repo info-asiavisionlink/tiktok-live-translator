@@ -10,20 +10,16 @@ export async function submitTranscript(text: string): Promise<void> {
   const store = getSessionStore();
   const timestamp = new Date().toISOString();
 
-  const transcript = store.addTranscript({
+  store.addTranscript({
     original: trimmed,
-    translated: trimmed,
+    translated: "",
     detectedLanguage: "unknown",
     timestamp,
   });
 
-  const response = await sendProcessWebhook({
+  void sendProcessWebhook({
     type: "transcript",
     text: trimmed,
     timestamp,
   });
-
-  if (typeof response?.translated === "string" && response.translated.length > 0) {
-    store.updateTranscriptTranslation(transcript.id, response.translated);
-  }
 }

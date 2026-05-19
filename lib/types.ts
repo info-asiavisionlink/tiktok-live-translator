@@ -1,3 +1,5 @@
+export type ConnectionState = "idle" | "connected" | "disconnected" | "ended";
+
 export interface Transcript {
   id: string;
   original: string;
@@ -25,11 +27,14 @@ export interface Gift {
 }
 
 export interface SessionStatus {
-  connected: boolean;
+  connectionState: ConnectionState;
   username: string | null;
+  viewerCount: number;
+  totalLikes: number;
+  followCount: number;
   totalTranscripts: number;
   totalComments: number;
-  totalGifts: number;
+  totalGiftCount: number;
   totalGiftCoins: number;
 }
 
@@ -47,4 +52,4 @@ export interface StartApiResponse {
   message?: string;
 }
 
-export type TranslationPhase = "idle" | "loading" | "error" | "active";
+export type TranslationPhase = "idle" | "loading" | "error" | "active" | "stopped";

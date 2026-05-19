@@ -98,8 +98,5 @@ export async function sendProcessWebhook(
     return null;
   }
 
-  const eventType = payload.type;
-  const parseJsonResponse = eventType === "transcript";
-
-  return postToWebhook(webhookUrl, payload, "process", parseJsonResponse);
+  return postToWebhook(webhookUrl, payload, "process", false);
 }

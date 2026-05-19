@@ -1,5 +1,6 @@
 import type {
   Comment,
+  ConnectionState,
   Gift,
   SessionData,
   SessionStatus,
@@ -14,20 +15,25 @@ function createId(): string {
 
 function emptyStatus(): SessionStatus {
   return {
-    connected: false,
+    connectionState: "idle",
     username: null,
+    viewerCount: 0,
+    totalLikes: 0,
+    followCount: 0,
     totalTranscripts: 0,
     totalComments: 0,
-    totalGifts: 0,
+    totalGiftCount: 0,
     totalGiftCoins: 0,
   };
 }
 
-function giftCoinTotal(gifts: Gift[]): number {
-  return gifts.reduce(
-    (sum, gift) => sum + gift.count * Math.max(0, gift.diamondCount),
-    0,
-  );
+export function calculateGiftCoins(
+  diamondCount: number,
+  repeatCount: number,
+  count: number,
+): number {
+  const quantity = repeatCount > 0 ? repeatCount : count > 0 ? count : 1;
+  return Math.max(0, diamondCount) * quantity;
 }
 
 export class SessionStore {
@@ -50,13 +56,38 @@ export class SessionStore {
     this.username = username;
     this.status = {
       ...emptyStatus(),
-      connected: false,
+      connectionState: "idle",
       username,
     };
   }
 
-  setConnected(connected: boolean): void {
-    this.status = { ...this.status, connected };
+  setConnectionState(connectionState: ConnectionState): void {
+    this.status = { ...this.status, connectionState };
+  }
+
+  setViewerCount(viewerCount: number): void {
+    this.status = { ...this.status, viewerCount: Math.max(0, viewerCount) };
+  }
+
+  setTotalLikes(totalLikes: number): void {
+    this.status = { ...this.status, totalLikes: Math.max(0, totalLikes) };
+  }
+
+  addLikes(count: number): void {
+    if (count <= 0) {
+      return;
+    }
+    this.status = {
+      ...this.status,
+      totalLikes: this.status.totalLikes + count,
+    };
+  }
+
+  incrementFollowCount(): void {
+    this.status = {
+      ...this.status,
+      followCount: this.status.followCount + 1,
+    };
   }
 
   addTranscript(entry: Omit<Transcript, "id">): Transcript {
@@ -67,12 +98,6 @@ export class SessionStore {
       totalTranscripts: this.transcripts.length,
     };
     return transcript;
-  }
-
-  updateTranscriptTranslation(id: string, translated: string): void {
-    this.transcripts = this.transcripts.map((transcript) =>
-      transcript.id === id ? { ...transcript, translated } : transcript,
-    );
   }
 
   addComment(entry: Omit<Comment, "id">): Comment {
@@ -87,11 +112,19 @@ export class SessionStore {
 
   addGift(entry: Omit<Gift, "id">): Gift {
     const gift: Gift = { id: createId(), ...entry };
+    const quantity =
+      gift.repeatCount > 0 ? gift.repeatCount : gift.count > 0 ? gift.count : 1;
+    const coins = calculateGiftCoins(
+      gift.diamondCount,
+      gift.repeatCount,
+      gift.count,
+    );
+
     this.gifts = [gift, ...this.gifts].slice(0, MAX_ITEMS);
     this.status = {
       ...this.status,
-      totalGifts: this.gifts.length,
-      totalGiftCoins: giftCoinTotal(this.gifts),
+      totalGiftCount: this.status.totalGiftCount + quantity,
+      totalGiftCoins: this.status.totalGiftCoins + coins,
     };
     return gift;
   }

@@ -108,7 +108,7 @@ export async function POST(request: Request) {
     await connectToTikTokLive(username);
 
     const snapshot = getSessionStore().getSnapshot();
-    if (!snapshot.status.connected) {
+    if (snapshot.status.connectionState !== "connected") {
       await disconnectTikTokLive();
       return NextResponse.json(
         {

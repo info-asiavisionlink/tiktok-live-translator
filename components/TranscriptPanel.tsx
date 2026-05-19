@@ -32,32 +32,16 @@ export function TranscriptPanel({ transcript }: TranscriptPanelProps) {
               {transcript.original}
             </p>
           </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-rose-500">
-              Translated
-            </p>
-            <p className="mt-1 text-lg font-medium leading-relaxed text-slate-900">
-              {transcript.translated}
+          <div className="mt-auto border-t border-slate-100 pt-4 text-sm">
+            <p className="text-slate-400">Timestamp</p>
+            <p className="font-semibold text-slate-700">
+              {formatTimestamp(transcript.timestamp)}
             </p>
           </div>
-          <dl className="mt-auto grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 text-sm">
-            <div>
-              <dt className="text-slate-400">Language</dt>
-              <dd className="font-semibold text-slate-700">
-                {transcript.detectedLanguage}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-slate-400">Timestamp</dt>
-              <dd className="font-semibold text-slate-700">
-                {formatTimestamp(transcript.timestamp)}
-              </dd>
-            </div>
-          </dl>
         </div>
       ) : (
         <p className="mt-6 flex flex-1 items-center justify-center text-slate-400">
-          Waiting for audio transcription…
+          Waiting for streamer speech…
         </p>
       )}
     </section>

@@ -69,15 +69,7 @@ function extractCaptionText(raw: unknown): string {
   return "";
 }
 
-export function getActiveConnection(): TikTokLiveConnection | null {
-  return globalForConnection.__tiktokLiveConnection ?? null;
-}
-
-export function isConnecting(): boolean {
-  return globalForConnection.__tiktokConnecting === true;
-}
-
-export async function disconnectTikTokLive(): Promise<void> {
+function closeConnection(): void {
   const connection = globalForConnection.__tiktokLiveConnection;
   if (connection) {
     try {
@@ -89,11 +81,33 @@ export async function disconnectTikTokLive(): Promise<void> {
   }
   globalForConnection.__tiktokLiveConnection = null;
   globalForConnection.__tiktokConnecting = false;
-  getSessionStore().setConnected(false);
+}
+
+export function getActiveConnection(): TikTokLiveConnection | null {
+  return globalForConnection.__tiktokLiveConnection ?? null;
+}
+
+export function isConnecting(): boolean {
+  return globalForConnection.__tiktokConnecting === true;
+}
+
+export async function disconnectTikTokLive(): Promise<void> {
+  closeConnection();
+  const store = getSessionStore();
+  if (store.getSnapshot().status.connectionState === "ended") {
+    return;
+  }
+  store.setConnectionState("disconnected");
+}
+
+async function handleStreamEnd(): Promise<void> {
+  const store = getSessionStore();
+  store.setConnectionState("ended");
+  closeConnection();
 }
 
 export async function connectToTikTokLive(username: string): Promise<void> {
-  await disconnectTikTokLive();
+  closeConnection();
 
   const store = getSessionStore();
   store.startSession(username);
@@ -108,19 +122,43 @@ export async function connectToTikTokLive(username: string): Promise<void> {
   globalForConnection.__tiktokConnecting = true;
 
   connection.on(ControlEvent.CONNECTED, () => {
-    store.setConnected(true);
+    store.setConnectionState("connected");
   });
 
   connection.on(ControlEvent.DISCONNECTED, () => {
-    store.setConnected(false);
+    const current = store.getSnapshot().status.connectionState;
+    if (current !== "ended") {
+      store.setConnectionState("disconnected");
+    }
+    closeConnection();
   });
 
   connection.on(WebcastEvent.STREAM_END, () => {
-    store.setConnected(false);
+    void handleStreamEnd();
   });
 
   connection.on(ControlEvent.ERROR, (error: unknown) => {
     console.error("[tiktok] Connection error:", error);
+  });
+
+  connection.on(WebcastEvent.ROOM_USER, (raw) => {
+    const data = raw as { viewerCount?: number };
+    if (typeof data.viewerCount === "number") {
+      store.setViewerCount(data.viewerCount);
+    }
+  });
+
+  connection.on(WebcastEvent.LIKE, (raw) => {
+    const data = raw as { likeCount?: number; totalLikeCount?: number };
+    if (typeof data.totalLikeCount === "number") {
+      store.setTotalLikes(data.totalLikeCount);
+    } else if (typeof data.likeCount === "number" && data.likeCount > 0) {
+      store.addLikes(data.likeCount);
+    }
+  });
+
+  connection.on(WebcastEvent.FOLLOW, () => {
+    store.incrementFollowCount();
   });
 
   connection.on(WebcastEvent.CHAT, (raw) => {
@@ -211,7 +249,7 @@ export async function connectToTikTokLive(username: string): Promise<void> {
     }
 
     await connection.connect();
-    store.setConnected(true);
+    store.setConnectionState("connected");
   } finally {
     globalForConnection.__tiktokConnecting = false;
   }
