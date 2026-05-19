@@ -13,6 +13,11 @@ export async function saveTranscript(
 
   const finalTranslated =
     translated !== undefined ? translated : await translateToJapanese(trimmed);
+
+  if (finalTranslated) {
+    console.info("[Audio] Translation success");
+  }
+
   const timestamp = new Date().toISOString();
 
   getSessionStore().addTranscript({
@@ -22,14 +27,12 @@ export async function saveTranscript(
     timestamp,
   });
 
+  console.info("[Audio] Transcript stored");
+
   void sendProcessWebhook({
     type: "transcript",
     text: trimmed,
     translated: finalTranslated,
     timestamp,
   });
-}
-
-export async function submitTranscript(text: string): Promise<void> {
-  await saveTranscript(text);
 }

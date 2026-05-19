@@ -5,7 +5,7 @@ import ffmpegStatic from "ffmpeg-static";
 import { dir } from "tmp-promise";
 import type { FfmpegCommand } from "fluent-ffmpeg";
 import { saveTranscript } from "./transcript-handler";
-import { resolveLiveStreamUrl } from "./tiktok-stream-url";
+import { resolveLiveStreamUrlWithRetry } from "./tiktok-stream-url";
 import { transcribeAudioFile } from "./whisper-transcribe";
 
 const CHUNK_SECONDS = 7;
@@ -83,8 +83,12 @@ async function safeUnlink(filePath: string): Promise<void> {
 }
 
 async function processChunkFile(filePath: string): Promise<void> {
+  const fileName = path.basename(filePath);
+  console.info(`[Audio] Chunk created: ${fileName}`);
+
   const stable = await waitForStableFile(filePath);
   if (!stable) {
+    console.error(`[Audio] Error: Chunk not stable ${fileName}`);
     return;
   }
 
@@ -114,7 +118,7 @@ async function drainProcessingQueue(state: AudioTranscriberState): Promise<void>
     try {
       await processChunkFile(filePath);
     } catch (error) {
-      console.error("[audio] Chunk processing failed:", error);
+      console.error("[Audio] Error: Chunk processing failed", error);
       await safeUnlink(filePath);
     }
   }
@@ -149,6 +153,7 @@ function watchChunkDirectory(tmpDir: string): void {
 
 function startFfmpegSegmenter(streamUrl: string, outputPattern: string): FfmpegCommand {
   const command = ffmpeg(streamUrl)
+    .inputOptions(["-reconnect 1", "-reconnect_streamed 1", "-reconnect_delay_max 5"])
     .noVideo()
     .audioChannels(1)
     .audioFrequency(16000)
@@ -160,11 +165,11 @@ function startFfmpegSegmenter(streamUrl: string, outputPattern: string): FfmpegC
       "-reset_timestamps 1",
     ])
     .output(outputPattern)
-    .on("start", (cmd) => {
-      console.info("[audio] FFmpeg started:", cmd);
+    .on("start", () => {
+      console.info("[Audio] FFmpeg started");
     })
     .on("error", (error) => {
-      console.error("[audio] FFmpeg error:", error.message);
+      console.error("[Audio] Error: FFmpeg failed", error.message);
     });
 
   command.run();
@@ -174,13 +179,17 @@ function startFfmpegSegmenter(streamUrl: string, outputPattern: string): FfmpegC
 export async function startAudioTranscription(liveUrl: string): Promise<void> {
   await stopAudioTranscription();
 
-  const streamUrl = await resolveLiveStreamUrl();
+  console.info(`[Audio] Resolving stream URL for ${liveUrl}`);
+
+  const streamUrl = await resolveLiveStreamUrlWithRetry();
   if (!streamUrl) {
     console.error(
-      `[audio] Could not resolve stream URL for live: ${liveUrl}`,
+      `[Audio] Error: Could not resolve stream URL for live: ${liveUrl}`,
     );
     return;
   }
+
+  console.info("[Audio] Stream URL found");
 
   configureFfmpeg();
 
@@ -198,9 +207,9 @@ export async function startAudioTranscription(liveUrl: string): Promise<void> {
   try {
     watchChunkDirectory(tmp.path);
     state.ffmpegCommand = startFfmpegSegmenter(streamUrl, outputPattern);
-    console.info(`[audio] Transcription started for ${liveUrl}`);
+    console.info("[Audio] Audio transcription pipeline started");
   } catch (error) {
-    console.error("[audio] Failed to start transcription:", error);
+    console.error("[Audio] Error: Failed to start transcription", error);
     await stopAudioTranscription();
   }
 }
@@ -223,7 +232,7 @@ export async function stopAudioTranscription(): Promise<void> {
     try {
       state.ffmpegCommand.kill("SIGTERM");
     } catch (error) {
-      console.error("[audio] Failed to kill FFmpeg:", error);
+      console.error("[Audio] Error: Failed to stop FFmpeg", error);
     }
     state.ffmpegCommand = null;
   }
@@ -245,7 +254,7 @@ export async function stopAudioTranscription(): Promise<void> {
     try {
       await state.cleanupTmp();
     } catch (error) {
-      console.error("[audio] Temp directory cleanup failed:", error);
+      console.error("[Audio] Error: Temp directory cleanup failed", error);
     }
   }
 
@@ -256,5 +265,5 @@ export async function stopAudioTranscription(): Promise<void> {
   state.isProcessingQueue = false;
   state.processing = Promise.resolve();
 
-  console.info("[audio] Transcription stopped");
+  console.info("[Audio] Audio transcription stopped");
 }

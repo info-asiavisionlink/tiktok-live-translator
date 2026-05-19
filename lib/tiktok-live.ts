@@ -12,7 +12,6 @@ import {
   setConnecting,
 } from "./tiktok-connection-registry";
 import { getSessionStore } from "./session-store";
-import { submitTranscript } from "./transcript-handler";
 
 function getUsername(data: {
   uniqueId?: string;
@@ -53,22 +52,6 @@ function getDiamondCount(data: {
     return fromInfo.diamondCount;
   }
   return 0;
-}
-
-function extractCaptionText(raw: unknown): string {
-  const data = raw as {
-    content?: string;
-    caption?: string;
-    text?: string;
-    captionText?: string;
-  };
-  const candidates = [data.content, data.caption, data.text, data.captionText];
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return "";
 }
 
 function closeConnection(): void {
@@ -233,13 +216,6 @@ export async function connectToTikTokLive(username: string): Promise<void> {
       giftId,
       timestamp,
     });
-  });
-
-  connection.on(WebcastEvent.CAPTION_MESSAGE, (raw) => {
-    const text = extractCaptionText(raw);
-    if (text) {
-      void submitTranscript(text);
-    }
   });
 
   try {

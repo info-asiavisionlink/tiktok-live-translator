@@ -1,102 +1,181 @@
 import { getActiveConnection } from "./tiktok-connection-registry";
 
-const STREAM_URL_PATTERN =
-  /^https?:\/\/.+(\.m3u8|\.flv|pull-|\/stage\/|\/obj\/)/i;
+const URL_IN_STRING_PATTERN =
+  /https?:\/\/[^\s"'<>\\]+(?:\.m3u8|\.flv|\.mp4|pull-|\/stage\/|\/obj\/|tiktokcdn|tiktokv)[^\s"'<>\\]*/gi;
 
-function isStreamUrl(value: string): boolean {
-  return STREAM_URL_PATTERN.test(value) || value.includes("tiktokcdn");
+function normalizeStreamUrl(url: string): string {
+  return url.replace(/\\u002F/g, "/").replace(/\\\//g, "/").trim();
 }
 
-function findStreamUrlDeep(value: unknown, depth = 0): string | null {
-  if (depth > 12 || value == null) {
-    return null;
+function scoreStreamUrl(url: string): number {
+  const lower = url.toLowerCase();
+  let score = 0;
+
+  if (lower.includes(".flv")) score += 50;
+  if (lower.includes(".m3u8")) score += 40;
+  if (lower.includes(".mp4")) score += 20;
+  if (lower.includes("hd") || lower.includes("origin")) score += 15;
+  if (lower.includes("pull-f5")) score += 10;
+  if (lower.includes("tiktokcdn") || lower.includes("tiktokv")) score += 5;
+
+  return score;
+}
+
+function isLikelyStreamUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return (
+    lower.startsWith("http") &&
+    (lower.includes(".m3u8") ||
+      lower.includes(".flv") ||
+      lower.includes(".mp4") ||
+      lower.includes("pull-") ||
+      lower.includes("/stage/") ||
+      lower.includes("/obj/") ||
+      lower.includes("tiktokcdn") ||
+      lower.includes("tiktokv.com"))
+  );
+}
+
+function collectUrlsFromValue(value: unknown, depth = 0, found: string[] = []): string[] {
+  if (depth > 16 || value == null) {
+    return found;
   }
 
   if (typeof value === "string") {
-    const trimmed = value.trim();
-    return isStreamUrl(trimmed) ? trimmed : null;
+    const normalized = normalizeStreamUrl(value);
+    if (isLikelyStreamUrl(normalized)) {
+      found.push(normalized);
+    }
+
+    const embedded = normalized.match(URL_IN_STRING_PATTERN);
+    if (embedded) {
+      for (const match of embedded) {
+        const cleaned = normalizeStreamUrl(match);
+        if (isLikelyStreamUrl(cleaned)) {
+          found.push(cleaned);
+        }
+      }
+    }
+    return found;
   }
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findStreamUrlDeep(item, depth + 1);
-      if (found) {
-        return found;
-      }
+      collectUrlsFromValue(item, depth + 1, found);
     }
-    return null;
+    return found;
   }
 
   if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-
-    const preferredKeys = [
-      "HD1",
-      "hd",
-      "origin",
-      "FULL_HD1",
-      "SD1",
-      "sd",
-      "flv_pull_url",
-      "hls_pull_url",
-      "rtmp_pull_url",
-      "stream_url",
-      "data",
-    ];
-
-    for (const key of preferredKeys) {
-      if (key in record) {
-        const found = findStreamUrlDeep(record[key], depth + 1);
-        if (found) {
-          return found;
-        }
-      }
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      collectUrlsFromValue(nested, depth + 1, found);
     }
+  }
 
-    for (const nested of Object.values(record)) {
-      const found = findStreamUrlDeep(nested, depth + 1);
-      if (found) {
-        return found;
-      }
+  return found;
+}
+
+function pickBestStreamUrl(urls: string[]): string | null {
+  const unique = [...new Set(urls)];
+  if (unique.length === 0) {
+    return null;
+  }
+
+  unique.sort((a, b) => scoreStreamUrl(b) - scoreStreamUrl(a));
+  return unique[0] ?? null;
+}
+
+export function extractStreamUrlFromRoomInfo(roomInfo: unknown): string | null {
+  const urls = collectUrlsFromValue(roomInfo);
+  return pickBestStreamUrl(urls);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function trySources(
+  label: string,
+  loader: () => Promise<unknown>,
+): Promise<string | null> {
+  try {
+    const data = await loader();
+    const url = extractStreamUrlFromRoomInfo(data);
+    if (url) {
+      console.info(`[Audio] Stream URL found (${label})`);
+      return url;
+    }
+  } catch (error) {
+    console.error(`[Audio] Error: ${label} failed`, error);
+  }
+  return null;
+}
+
+export async function resolveLiveStreamUrl(): Promise<string | null> {
+  const connection = getActiveConnection();
+  if (!connection) {
+    console.error("[Audio] Error: No active TikTok connection");
+    return null;
+  }
+
+  const sources: Array<{ label: string; loader: () => Promise<unknown> }> = [
+    { label: "connection.roomInfo", loader: async () => connection.roomInfo },
+    { label: "connection.state", loader: async () => connection.state },
+    {
+      label: "fetchRoomInfo",
+      loader: () => connection.fetchRoomInfo(),
+    },
+    {
+      label: "fetchRoomInfoFromApiLive",
+      loader: () =>
+        connection.webClient.fetchRoomInfoFromApiLive({
+          uniqueId: connection.uniqueId,
+        }),
+    },
+    {
+      label: "fetchRoomInfoFromHtml",
+      loader: () =>
+        connection.webClient.fetchRoomInfoFromHtml({
+          uniqueId: connection.uniqueId,
+        }),
+    },
+    {
+      label: "fetchRoomInfoFromEuler",
+      loader: () =>
+        connection.webClient.fetchRoomInfoFromEuler({
+          uniqueId: connection.uniqueId,
+        }),
+    },
+  ];
+
+  for (const source of sources) {
+    const url = await trySources(source.label, source.loader);
+    if (url) {
+      return url;
     }
   }
 
   return null;
 }
 
-export function extractStreamUrlFromRoomInfo(roomInfo: unknown): string | null {
-  return findStreamUrlDeep(roomInfo);
-}
-
-export async function resolveLiveStreamUrl(): Promise<string | null> {
-  const connection = getActiveConnection();
-  if (!connection) {
-    return null;
-  }
-
-  let url = extractStreamUrlFromRoomInfo(connection.roomInfo);
-  if (url) {
-    return url;
-  }
-
-  try {
-    const roomInfo = await connection.fetchRoomInfo();
-    url = extractStreamUrlFromRoomInfo(roomInfo);
+export async function resolveLiveStreamUrlWithRetry(
+  attempts = 6,
+  delayMs = 2000,
+): Promise<string | null> {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const url = await resolveLiveStreamUrl();
     if (url) {
       return url;
     }
-  } catch (error) {
-    console.error("[audio] fetchRoomInfo failed:", error);
+
+    if (attempt < attempts) {
+      console.info(
+        `[Audio] Stream URL not ready (attempt ${attempt}/${attempts}), retrying...`,
+      );
+      await sleep(delayMs);
+    }
   }
 
-  try {
-    const htmlInfo = await connection.webClient.fetchRoomInfoFromHtml({
-      uniqueId: connection.uniqueId,
-    });
-    url = extractStreamUrlFromRoomInfo(htmlInfo);
-  } catch (error) {
-    console.error("[audio] fetchRoomInfoFromHtml failed:", error);
-  }
-
-  return url;
+  console.error("[Audio] Error: Could not resolve stream URL after retries");
+  return null;
 }

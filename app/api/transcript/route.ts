@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
-import { submitTranscript } from "@/lib/transcript-handler";
+import { saveTranscript } from "@/lib/transcript-handler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface TranscriptRequestBody {
   text?: string;
-  timestamp?: string;
+  translated?: string;
 }
 
+/** Ingest transcript from external pipeline (not CAPTION_MESSAGE) */
 export async function POST(request: Request) {
   let body: TranscriptRequestBody;
 
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
     );
   }
 
-  await submitTranscript(text);
+  await saveTranscript(text, body.translated?.trim());
+
   return NextResponse.json({ success: true });
 }

@@ -6,6 +6,7 @@ const WHISPER_MODEL = "whisper-1";
 export async function transcribeAudioFile(filePath: string): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
+    console.error("[Audio] Error: OPENAI_API_KEY is not configured");
     return "";
   }
 
@@ -13,7 +14,7 @@ export async function transcribeAudioFile(filePath: string): Promise<string> {
   try {
     buffer = await fs.promises.readFile(filePath);
   } catch (error) {
-    console.error("[whisper] Failed to read audio file:", error);
+    console.error("[Audio] Error: Failed to read audio chunk", error);
     return "";
   }
 
@@ -40,15 +41,21 @@ export async function transcribeAudioFile(filePath: string): Promise<string> {
 
     if (!response.ok) {
       console.error(
-        `[whisper] API error: ${response.status} ${response.statusText}`,
+        `[Audio] Error: Whisper API ${response.status} ${response.statusText}`,
       );
       return "";
     }
 
     const data = (await response.json()) as { text?: string };
-    return data.text?.trim() ?? "";
+    const text = data.text?.trim() ?? "";
+
+    if (text) {
+      console.info("[Audio] Whisper transcription success");
+    }
+
+    return text;
   } catch (error) {
-    console.error("[whisper] Transcription request failed:", error);
+    console.error("[Audio] Error: Whisper request failed", error);
     return "";
   }
 }
