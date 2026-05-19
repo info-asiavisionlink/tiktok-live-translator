@@ -118,14 +118,7 @@ export default function Home() {
 
         {showDashboard && (
           <div className="mt-12 grid gap-6 lg:grid-cols-2 lg:gap-8">
-            <TranscriptPanel
-              key={
-                session.currentTranscript?.id ??
-                session.currentTranscript?.timestamp ??
-                "no-transcript"
-              }
-              session={session}
-            />
+            <TranscriptPanel session={session} />
             <StatusPanel status={session.status} />
             <CommentPanel comments={comments} />
             <GiftPanel
