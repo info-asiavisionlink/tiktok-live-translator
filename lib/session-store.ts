@@ -120,12 +120,6 @@ export class SessionStore {
     return this.transcripts[this.transcripts.length - 1] ?? null;
   }
 
-  updateTranscriptTranslation(id: string, translated: string): void {
-    this.transcripts = this.transcripts.map((transcript) =>
-      transcript.id === id ? { ...transcript, translated } : transcript,
-    );
-  }
-
   addComment(entry: Omit<Comment, "id">): Comment {
     const comment: Comment = { id: createId(), ...entry };
     this.comments = [comment, ...this.comments].slice(0, MAX_ITEMS);

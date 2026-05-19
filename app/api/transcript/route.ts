@@ -6,7 +6,6 @@ export const dynamic = "force-dynamic";
 
 interface TranscriptRequestBody {
   text?: string;
-  translated?: string;
 }
 
 /** Ingest transcript from external pipeline (not CAPTION_MESSAGE) */
@@ -30,7 +29,7 @@ export async function POST(request: Request) {
     );
   }
 
-  await saveTranscript(text, body.translated?.trim());
+  await saveTranscript(text);
 
   return NextResponse.json({ success: true });
 }

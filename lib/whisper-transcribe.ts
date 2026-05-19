@@ -4,9 +4,12 @@ const WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions";
 const WHISPER_MODEL = "whisper-1";
 
 export async function transcribeAudioFile(filePath: string): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiKey =
+    process.env.WHISPER_API_KEY?.trim() ?? process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
-    console.error("[Audio] Error: OPENAI_API_KEY is not configured");
+    console.error(
+      "[Audio] Error: WHISPER_API_KEY (or OPENAI_API_KEY) is not configured",
+    );
     return "";
   }
 

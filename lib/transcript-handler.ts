@@ -1,29 +1,20 @@
 import { sendProcessWebhook } from "./n8n";
-import { translateToJapanese } from "./openai-translate";
 import { getSessionStore } from "./session-store";
+import { getFiveMinuteBlock } from "./transcript-block";
 
-export async function saveTranscript(
-  original: string,
-  translated?: string,
-): Promise<void> {
+export async function saveTranscript(original: string): Promise<void> {
   const trimmed = original.trim();
   if (!trimmed) {
     return;
   }
 
-  const finalTranslated =
-    translated !== undefined ? translated : await translateToJapanese(trimmed);
-
-  if (finalTranslated) {
-    console.info("[Audio] Translation success");
-  }
-
   const timestamp = new Date().toISOString();
+  const { blockStart, blockEnd } = getFiveMinuteBlock(timestamp);
 
   getSessionStore().addTranscript({
     original: trimmed,
-    translated: finalTranslated,
-    detectedLanguage: "unknown",
+    translated: "",
+    detectedLanguage: "auto",
     timestamp,
   });
 
@@ -32,7 +23,9 @@ export async function saveTranscript(
   void sendProcessWebhook({
     type: "transcript",
     text: trimmed,
-    translated: finalTranslated,
+    language: "auto",
     timestamp,
+    blockStart,
+    blockEnd,
   });
 }
