@@ -34,7 +34,7 @@ export default function Home() {
 
     if (!isValidTikTokLiveUrl(url)) {
       setValidationError(
-        "Please enter a valid TikTok Live URL (e.g. https://www.tiktok.com/@username/live).",
+        "有効な TikTok Live URL を入力してください（例: https://www.tiktok.com/@username/live）。",
       );
       return;
     }
@@ -50,8 +50,8 @@ export default function Home() {
             TikTok Live Translator
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-slate-600">
-            Paste a TikTok Live URL to start real-time transcription, translation,
-            comments, and gifts powered by your n8n workflow.
+            TikTok Live URL を入力すると、ライブのコメント・ギフトをリアルタイムで取得し、n8n
+            経由で翻訳・保存します。
           </p>
         </header>
 
@@ -70,7 +70,7 @@ export default function Home() {
               className="mx-auto mt-6 flex max-w-2xl items-center justify-center gap-3 rounded-2xl border border-rose-100 bg-white px-5 py-4 text-slate-700 shadow-sm"
             >
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-rose-200 border-t-rose-500" />
-              Connecting to TikTok Live and starting translation…
+              TikTok Live に接続しています…
             </div>
           )}
 
@@ -79,7 +79,7 @@ export default function Home() {
               role="alert"
               className="mx-auto mt-6 max-w-2xl rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-800"
             >
-              <p className="font-semibold">Something went wrong</p>
+              <p className="font-semibold">エラーが発生しました</p>
               <p className="mt-1 text-sm">{displayError}</p>
               {phase === "error" && (
                 <button
@@ -90,7 +90,7 @@ export default function Home() {
                   }}
                   className="mt-3 text-sm font-semibold text-red-700 underline underline-offset-2 hover:text-red-900"
                 >
-                  Try again
+                  もう一度試す
                 </button>
               )}
             </div>
@@ -101,7 +101,7 @@ export default function Home() {
               role="status"
               className="mx-auto mt-6 max-w-2xl rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-900"
             >
-              <p className="font-semibold">Session active</p>
+              <p className="font-semibold">セッション接続中</p>
               <p className="mt-1 text-sm">{successMessage}</p>
               <button
                 type="button"
@@ -111,7 +111,7 @@ export default function Home() {
                 }}
                 className="mt-3 text-sm font-semibold text-emerald-800 underline underline-offset-2 hover:text-emerald-950"
               >
-                End session
+                セッションを終了
               </button>
             </div>
           )}
@@ -129,4 +129,3 @@ export default function Home() {
     </div>
   );
 }
-

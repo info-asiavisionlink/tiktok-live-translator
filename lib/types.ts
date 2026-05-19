@@ -22,11 +22,35 @@ export interface Gift {
   timestamp?: string;
 }
 
+export interface MemberEntry {
+  id: string;
+  username: string;
+  timestamp: string;
+}
+
 export interface SessionStatus {
   connected: boolean;
+  username: string | null;
   totalTranscripts: number;
   totalComments: number;
   totalGifts: number;
+  totalMembers: number;
+  totalLikes: number;
+}
+
+export interface SessionData {
+  username: string | null;
+  transcripts: Transcript[];
+  comments: Comment[];
+  gifts: Gift[];
+  members: MemberEntry[];
+  status: SessionStatus;
+}
+
+export interface StartApiResponse {
+  success: boolean;
+  username?: string;
+  message?: string;
 }
 
 export interface ApiResponse {

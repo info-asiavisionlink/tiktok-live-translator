@@ -1,15 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startTranslation, WebhookError } from "@/lib/api";
-import {
-  createMockComment,
-  createMockGift,
-  createMockTranscript,
-  hasLivePayload,
-} from "@/lib/mock";
+import { ApiError, fetchSession, startLiveSession, stopLiveSession } from "@/lib/api";
 import type {
-  ApiResponse,
   Comment,
   Gift,
   SessionStatus,
@@ -17,75 +10,17 @@ import type {
   TranslationPhase,
 } from "@/lib/types";
 
-const MOCK_TICK_MS = 3500;
-const MAX_LIST_ITEMS = 50;
+const POLL_INTERVAL_MS = 2000;
 
-function buildSession(
-  connected: boolean,
-  transcripts: number,
-  comments: number,
-  gifts: number,
-  partial?: Partial<SessionStatus>,
-): SessionStatus {
-  return {
-    connected,
-    totalTranscripts: partial?.totalTranscripts ?? transcripts,
-    totalComments: partial?.totalComments ?? comments,
-    totalGifts: partial?.totalGifts ?? gifts,
-  };
-}
-
-function applyApiResponse(
-  response: ApiResponse,
-  setCurrentTranscript: (t: Transcript | null) => void,
-  setComments: React.Dispatch<React.SetStateAction<Comment[]>>,
-  setGifts: React.Dispatch<React.SetStateAction<Gift[]>>,
-  setSession: React.Dispatch<React.SetStateAction<SessionStatus>>,
-) {
-  const latestTranscript =
-    response.transcript ??
-    (response.transcripts?.length
-      ? response.transcripts[response.transcripts.length - 1]
-      : null);
-
-  if (latestTranscript) {
-    setCurrentTranscript(latestTranscript);
-  }
-
-  if (response.comments?.length) {
-    setComments((prev) =>
-      [...response.comments!, ...prev].slice(0, MAX_LIST_ITEMS),
-    );
-  }
-
-  if (response.gifts?.length) {
-    setGifts((prev) => [...response.gifts!, ...prev].slice(0, MAX_LIST_ITEMS));
-  }
-
-  setSession((prev) => {
-    const transcriptCount =
-      response.session?.totalTranscripts ??
-      (latestTranscript ? prev.totalTranscripts + 1 : prev.totalTranscripts);
-    const commentCount =
-      response.session?.totalComments ??
-      (response.comments?.length
-        ? prev.totalComments + response.comments.length
-        : prev.totalComments);
-    const giftCount =
-      response.session?.totalGifts ??
-      (response.gifts?.length
-        ? prev.totalGifts + response.gifts.length
-        : prev.totalGifts);
-
-    return buildSession(
-      response.session?.connected ?? true,
-      transcriptCount,
-      commentCount,
-      giftCount,
-      response.session,
-    );
-  });
-}
+const EMPTY_STATUS: SessionStatus = {
+  connected: false,
+  username: null,
+  totalTranscripts: 0,
+  totalComments: 0,
+  totalGifts: 0,
+  totalMembers: 0,
+  totalLikes: 0,
+};
 
 export function useLiveSession() {
   const [phase, setPhase] = useState<TranslationPhase>("idle");
@@ -96,115 +31,96 @@ export function useLiveSession() {
   );
   const [comments, setComments] = useState<Comment[]>([]);
   const [gifts, setGifts] = useState<Gift[]>([]);
-  const [session, setSession] = useState<SessionStatus>(
-    buildSession(false, 0, 0, 0),
-  );
+  const [session, setSession] = useState<SessionStatus>(EMPTY_STATUS);
 
-  const mockIndexRef = useRef(0);
-  const mockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isActiveRef = useRef(false);
 
-  const stopMockStream = useCallback(() => {
-    if (mockIntervalRef.current) {
-      clearInterval(mockIntervalRef.current);
-      mockIntervalRef.current = null;
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
   }, []);
 
-  const startMockStream = useCallback(() => {
-    stopMockStream();
-    setSession(buildSession(true, 0, 0, 0));
+  const syncFromServer = useCallback(async () => {
+    try {
+      const data = await fetchSession();
+      const latestTranscript =
+        data.transcripts[0] ?? data.transcript ?? null;
 
-    mockIntervalRef.current = setInterval(() => {
-      const index = mockIndexRef.current;
-      mockIndexRef.current += 1;
-      const tick = index % 3;
-
-      if (tick === 0) {
-        const transcript = createMockTranscript(index);
-        setCurrentTranscript(transcript);
-        setSession((prev) =>
-          buildSession(true, prev.totalTranscripts + 1, prev.totalComments, prev.totalGifts),
-        );
-      } else if (tick === 1) {
-        const comment = createMockComment(index);
-        setComments((prev) => [comment, ...prev].slice(0, MAX_LIST_ITEMS));
-        setSession((prev) =>
-          buildSession(true, prev.totalTranscripts, prev.totalComments + 1, prev.totalGifts),
-        );
-      } else {
-        const gift = createMockGift(index);
-        setGifts((prev) => [gift, ...prev].slice(0, MAX_LIST_ITEMS));
-        setSession((prev) =>
-          buildSession(true, prev.totalTranscripts, prev.totalComments, prev.totalGifts + 1),
-        );
+      setCurrentTranscript(latestTranscript);
+      setComments(data.comments);
+      setGifts(data.gifts);
+      setSession(data.status);
+    } catch (err) {
+      if (isActiveRef.current) {
+        console.error("[session] Poll failed:", err);
       }
-    }, MOCK_TICK_MS);
-  }, [stopMockStream]);
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    void syncFromServer();
+    pollIntervalRef.current = setInterval(() => {
+      void syncFromServer();
+    }, POLL_INTERVAL_MS);
+  }, [stopPolling, syncFromServer]);
 
   const resetSession = useCallback(() => {
-    stopMockStream();
-    mockIndexRef.current = 0;
+    isActiveRef.current = false;
+    stopPolling();
+    void stopLiveSession();
     setCurrentTranscript(null);
     setComments([]);
     setGifts([]);
-    setSession(buildSession(false, 0, 0, 0));
+    setSession(EMPTY_STATUS);
     setError(null);
     setSuccessMessage(null);
     setPhase("idle");
-  }, [stopMockStream]);
+  }, [stopPolling]);
 
-  const handleStart = useCallback(async (url: string) => {
-    setPhase("loading");
-    setError(null);
-    setSuccessMessage(null);
-    setCurrentTranscript(null);
-    setComments([]);
-    setGifts([]);
-    setSession(buildSession(false, 0, 0, 0));
-    stopMockStream();
-    mockIndexRef.current = 0;
+  const handleStart = useCallback(
+    async (url: string) => {
+      setPhase("loading");
+      setError(null);
+      setSuccessMessage(null);
+      setCurrentTranscript(null);
+      setComments([]);
+      setGifts([]);
+      setSession(EMPTY_STATUS);
+      stopPolling();
+      isActiveRef.current = false;
 
-    try {
-      const response = await startTranslation(url);
-      setPhase("active");
-      setSuccessMessage(
-        response.message ?? "Translation session started successfully.",
-      );
-
-      const shouldUseMock =
-        response.useMockData === true || !hasLivePayload(response);
-
-      if (!shouldUseMock) {
-        applyApiResponse(
-          response,
-          setCurrentTranscript,
-          setComments,
-          setGifts,
-          setSession,
-        );
-        setSession((prev) => ({ ...prev, connected: true }));
-      } else {
-        startMockStream();
+      try {
+        const result = await startLiveSession(url);
+        isActiveRef.current = true;
+        setPhase("active");
         setSuccessMessage(
-          (prev) =>
-            `${prev ?? "Session started."} Showing sample data until live updates arrive from n8n.`,
+          `@${result.username} のライブに接続しました。リアルタイムでイベントを表示しています。`,
         );
+        startPolling();
+      } catch (err) {
+        setPhase("error");
+        if (err instanceof ApiError) {
+          setError(err.message);
+        } else if (err instanceof Error) {
+          setError(err.message);
+        } else {
+          setError("予期しないエラーが発生しました。もう一度お試しください。");
+        }
       }
-    } catch (err) {
-      setPhase("error");
-      if (err instanceof WebhookError) {
-        setError(err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("An unexpected error occurred. Please try again.");
-      }
-    }
-  }, [startMockStream, stopMockStream]);
+    },
+    [startPolling, stopPolling],
+  );
 
   useEffect(() => {
-    return () => stopMockStream();
-  }, [stopMockStream]);
+    return () => {
+      isActiveRef.current = false;
+      stopPolling();
+    };
+  }, [stopPolling]);
 
   return {
     phase,

@@ -44,7 +44,7 @@ export function URLForm({
         disabled={loading || disabled}
         className="w-full rounded-2xl bg-gradient-to-r from-rose-500 to-pink-600 px-6 py-4 text-lg font-semibold text-white shadow-lg shadow-rose-200 transition hover:from-rose-600 hover:to-pink-700 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-[220px]"
       >
-        {loading ? "Starting…" : "Start Translation"}
+        {loading ? "接続中…" : "翻訳を開始"}
       </button>
     </form>
   );
