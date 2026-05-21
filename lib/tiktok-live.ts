@@ -4,7 +4,7 @@ import {
   WebcastEvent,
 } from "tiktok-live-connector";
 import { stopAudioTranscription } from "./audio-transcriber";
-import { sendProcessWebhook } from "./n8n";
+import { bufferComment, bufferGift } from "./n8n-buffers";
 import {
   getActiveConnection,
   isConnecting,
@@ -176,16 +176,9 @@ export async function connectToTikTokLive(username: string): Promise<void> {
       typeof data.comment === "string" ? data.comment : String(data.comment ?? "");
     const timestamp = new Date().toISOString();
 
-    store.addComment({
+    bufferComment({
       username: chatUsername,
       original: text,
-      timestamp,
-    });
-
-    void sendProcessWebhook({
-      type: "comment",
-      username: chatUsername,
-      text,
       timestamp,
     });
   });
@@ -217,18 +210,7 @@ export async function connectToTikTokLive(username: string): Promise<void> {
     const giftId = data.giftId ?? null;
     const timestamp = new Date().toISOString();
 
-    store.addGift({
-      username: giftUsername,
-      giftName,
-      count: repeatCount,
-      repeatCount,
-      diamondCount,
-      giftId,
-      timestamp,
-    });
-
-    void sendProcessWebhook({
-      type: "gift",
+    bufferGift({
       username: giftUsername,
       giftName,
       count: repeatCount,

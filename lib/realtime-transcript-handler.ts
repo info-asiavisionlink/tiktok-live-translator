@@ -6,38 +6,59 @@ export function setPartialTranscript(text: string): void {
   getSessionStore().setCurrentPartialTranscript(text);
 }
 
-export function finalizeRealtimeTranscript(text: string): void {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    getSessionStore().setCurrentPartialTranscript("");
+export function setPartialTranslation(text: string): void {
+  getSessionStore().setCurrentPartialTranslation(text);
+}
+
+export function clearPartials(): void {
+  const store = getSessionStore();
+  store.setCurrentPartialTranscript("");
+  store.setCurrentPartialTranslation("");
+}
+
+export function finalizeRealtimeTranscript(
+  original: string,
+  translated: string,
+): void {
+  const trimmedOriginal = original.trim();
+  const trimmedTranslated = translated.trim();
+
+  if (!trimmedOriginal && !trimmedTranslated) {
+    clearPartials();
     return;
   }
 
-  getSessionStore().setCurrentPartialTranscript("");
+  clearPartials();
+
   getSessionStore().addTranscript({
-    original: trimmed,
-    translated: "",
+    original: trimmedOriginal,
+    translated: trimmedTranslated,
     detectedLanguage: "auto",
   });
-  getSessionStore().appendTranscriptBuffer(trimmed);
+  getSessionStore().appendTranscriptBuffer(trimmedOriginal, trimmedTranslated);
 
-  console.log("[Realtime] Final transcript:", trimmed);
+  console.log("[Realtime] Final transcript:", trimmedOriginal);
+  if (trimmedTranslated) {
+    console.log("[Realtime] Final translation:", trimmedTranslated);
+  }
 }
 
 export async function flushTranscriptBlock(): Promise<void> {
   const store = getSessionStore();
-  const lines = store.drainTranscriptBuffer();
+  const entries = store.drainTranscriptBuffer();
 
-  if (lines.length === 0) {
+  if (entries.length === 0) {
     return;
   }
 
-  const text = lines.join("\n");
+  const text = entries.map((entry) => entry.original).join("\n");
+  const translated = entries.map((entry) => entry.translated).join("\n");
   const { blockStart, blockEnd } = getThreeMinuteBlock();
 
   void sendProcessWebhook({
     type: "transcript_block",
     text,
+    translated,
     blockStart,
     blockEnd,
   });

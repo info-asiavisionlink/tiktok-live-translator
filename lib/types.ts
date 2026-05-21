@@ -46,6 +46,7 @@ export interface SessionData {
   status: SessionStatus;
   currentTranscript: Transcript | null;
   currentPartialTranscript: string;
+  currentPartialTranslation: string;
 }
 
 export interface StartApiResponse {

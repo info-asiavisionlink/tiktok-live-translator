@@ -9,6 +9,11 @@ import type {
 
 const MAX_ITEMS = 100;
 
+export interface TranscriptBufferEntry {
+  original: string;
+  translated: string;
+}
+
 function createId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -43,7 +48,10 @@ export class SessionStore {
   private gifts: Gift[] = [];
   private status: SessionStatus = emptyStatus();
   private currentPartialTranscript = "";
-  private transcriptBuffer: string[] = [];
+  private currentPartialTranslation = "";
+  private transcriptBuffer: TranscriptBufferEntry[] = [];
+  private commentBuffer: Comment[] = [];
+  private giftBuffer: Gift[] = [];
 
   reset(): void {
     this.username = null;
@@ -52,7 +60,10 @@ export class SessionStore {
     this.gifts = [];
     this.status = emptyStatus();
     this.currentPartialTranscript = "";
+    this.currentPartialTranslation = "";
     this.transcriptBuffer = [];
+    this.commentBuffer = [];
+    this.giftBuffer = [];
   }
 
   startSession(username: string): void {
@@ -98,22 +109,62 @@ export class SessionStore {
     this.currentPartialTranscript = text;
   }
 
+  setCurrentPartialTranslation(text: string): void {
+    this.currentPartialTranslation = text;
+  }
+
   getCurrentPartialTranscript(): string {
     return this.currentPartialTranscript;
   }
 
-  appendTranscriptBuffer(text: string): void {
-    const trimmed = text.trim();
-    if (!trimmed) {
-      return;
-    }
-    this.transcriptBuffer.push(trimmed);
+  getCurrentPartialTranslation(): string {
+    return this.currentPartialTranslation;
   }
 
-  drainTranscriptBuffer(): string[] {
+  appendTranscriptBuffer(original: string, translated: string): void {
+    const trimmedOriginal = original.trim();
+    const trimmedTranslated = translated.trim();
+    if (!trimmedOriginal && !trimmedTranslated) {
+      return;
+    }
+    this.transcriptBuffer.push({
+      original: trimmedOriginal,
+      translated: trimmedTranslated,
+    });
+  }
+
+  drainTranscriptBuffer(): TranscriptBufferEntry[] {
     const drained = [...this.transcriptBuffer];
     this.transcriptBuffer = [];
     return drained;
+  }
+
+  appendCommentBuffer(comment: Comment): void {
+    this.commentBuffer.push(comment);
+  }
+
+  drainCommentBuffer(): Comment[] {
+    const drained = [...this.commentBuffer];
+    this.commentBuffer = [];
+    return drained;
+  }
+
+  getCommentBufferLength(): number {
+    return this.commentBuffer.length;
+  }
+
+  appendGiftBuffer(gift: Gift): void {
+    this.giftBuffer.push(gift);
+  }
+
+  drainGiftBuffer(): Gift[] {
+    const drained = [...this.giftBuffer];
+    this.giftBuffer = [];
+    return drained;
+  }
+
+  getGiftBufferLength(): number {
+    return this.giftBuffer.length;
   }
 
   clearDisplayTranscripts(): void {
@@ -124,12 +175,14 @@ export class SessionStore {
     };
   }
 
-  addTranscript(entry: Omit<Transcript, "id" | "timestamp"> & { timestamp?: string }): Transcript {
+  addTranscript(
+    entry: Omit<Transcript, "id" | "timestamp"> & { timestamp?: string },
+  ): Transcript {
     const transcript: Transcript = {
       id: createId(),
       original: entry.original,
       translated: entry.translated,
-      detectedLanguage: entry.detectedLanguage,
+      detectedLanguage: entry.detectedLanguage ?? "auto",
       timestamp: entry.timestamp ?? new Date().toISOString(),
     };
 
@@ -192,6 +245,7 @@ export class SessionStore {
       status: { ...this.status },
       currentTranscript: this.getCurrentTranscript(),
       currentPartialTranscript: this.currentPartialTranscript,
+      currentPartialTranslation: this.currentPartialTranslation,
     };
   }
 }

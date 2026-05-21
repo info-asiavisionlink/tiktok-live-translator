@@ -1,22 +1,25 @@
 import WebSocket from "ws";
 import {
+  clearPartials,
   finalizeRealtimeTranscript,
   setPartialTranscript,
+  setPartialTranslation,
 } from "./realtime-transcript-handler";
 
-const REALTIME_SESSION_MODEL = "gpt-realtime-1.5";
-const REALTIME_TRANSCRIPTION_MODEL = "gpt-realtime-whisper";
-const REALTIME_GA_WS_BASE = "wss://api.openai.com/v1/realtime";
+const REALTIME_TRANSLATE_MODEL = "gpt-realtime-translate";
+const REALTIME_TRANSLATIONS_WS_BASE =
+  "wss://api.openai.com/v1/realtime/translations";
+const OUTPUT_LANGUAGE = "ja";
 const CONNECT_TIMEOUT_MS = 15_000;
+const FINALIZE_PAUSE_MS = 1_200;
 
-/** OpenAI Realtime GA transcription requires 24 kHz PCM16 mono. */
+/** OpenAI Realtime translation requires 24 kHz PCM16 mono. */
 export const REALTIME_PCM_SAMPLE_RATE = 24_000;
 
 type RealtimeEvent = {
   type?: string;
   delta?: string;
   transcript?: string;
-  item_id?: string;
   error?: {
     type?: string;
     message?: string;
@@ -29,9 +32,9 @@ export interface RealtimeTranscriberCallbacks {
   onDisconnected?: () => void;
 }
 
-function buildRealtimeWebSocketUrl(): string {
-  const url = new URL(REALTIME_GA_WS_BASE);
-  url.searchParams.set("model", REALTIME_SESSION_MODEL);
+function buildTranslationWebSocketUrl(): string {
+  const url = new URL(REALTIME_TRANSLATIONS_WS_BASE);
+  url.searchParams.set("model", REALTIME_TRANSLATE_MODEL);
   return url.toString();
 }
 
@@ -39,8 +42,8 @@ function isSessionReadyEvent(type: string): boolean {
   return (
     type === "session.created" ||
     type === "session.updated" ||
-    type === "transcription_session.created" ||
-    type === "transcription_session.updated"
+    type === "translation_session.created" ||
+    type === "translation_session.updated"
   );
 }
 
@@ -48,8 +51,10 @@ export class OpenAiRealtimeTranscriber {
   private ws: WebSocket | null = null;
   private connected = false;
   private closed = false;
-  private readonly partialByItem = new Map<string, string>();
-  private activeItemId: string | null = null;
+  private closingSession = false;
+  private inputPartial = "";
+  private outputPartial = "";
+  private finalizeTimer: ReturnType<typeof setTimeout> | null = null;
   private rejectConnect: ((error: Error) => void) | null = null;
 
   constructor(private readonly callbacks: RealtimeTranscriberCallbacks = {}) {}
@@ -60,9 +65,9 @@ export class OpenAiRealtimeTranscriber {
       throw new Error("OPENAI_API_KEY is not configured");
     }
 
-    const wsUrl = buildRealtimeWebSocketUrl();
-    console.log("[Realtime] Using session model:", REALTIME_SESSION_MODEL);
-    console.log("[Realtime] Using transcription model:", REALTIME_TRANSCRIPTION_MODEL);
+    const wsUrl = buildTranslationWebSocketUrl();
+    console.log("[Realtime] Using translation model:", REALTIME_TRANSLATE_MODEL);
+    console.log("[Realtime] Output language:", OUTPUT_LANGUAGE);
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -105,7 +110,7 @@ export class OpenAiRealtimeTranscriber {
       });
 
       this.ws.on("open", () => {
-        this.sendTranscriptionSessionUpdate();
+        this.sendTranslationSessionUpdate();
       });
 
       this.ws.on("message", (data) => {
@@ -141,28 +146,13 @@ export class OpenAiRealtimeTranscriber {
     });
   }
 
-  /** GA Realtime API: realtime session + dedicated input transcription model. */
-  private sendTranscriptionSessionUpdate(): void {
+  private sendTranslationSessionUpdate(): void {
     this.send({
       type: "session.update",
       session: {
-        type: "realtime",
-        modalities: ["audio", "text"],
         audio: {
-          input: {
-            format: {
-              type: "audio/pcm",
-              rate: REALTIME_PCM_SAMPLE_RATE,
-            },
-            transcription: {
-              model: REALTIME_TRANSCRIPTION_MODEL,
-            },
-            turn_detection: {
-              type: "server_vad",
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500,
-            },
+          output: {
+            language: OUTPUT_LANGUAGE,
           },
         },
       },
@@ -174,6 +164,30 @@ export class OpenAiRealtimeTranscriber {
       return;
     }
     this.ws.send(JSON.stringify(payload));
+  }
+
+  private scheduleFinalize(): void {
+    if (this.finalizeTimer) {
+      clearTimeout(this.finalizeTimer);
+    }
+
+    this.finalizeTimer = setTimeout(() => {
+      this.finalizeTimer = null;
+      this.commitCurrentTurn();
+    }, FINALIZE_PAUSE_MS);
+  }
+
+  private commitCurrentTurn(): void {
+    const original = this.inputPartial.trim();
+    const translated = this.outputPartial.trim();
+
+    if (!original && !translated) {
+      return;
+    }
+
+    this.inputPartial = "";
+    this.outputPartial = "";
+    finalizeRealtimeTranscript(original, translated);
   }
 
   private handleEvent(
@@ -197,33 +211,52 @@ export class OpenAiRealtimeTranscriber {
       return;
     }
 
-    if (type === "conversation.item.input_audio_transcription.delta") {
-      const itemId = event.item_id ?? "default";
-      const previous = this.partialByItem.get(itemId) ?? "";
-      const next = previous + (event.delta ?? "");
-      this.partialByItem.set(itemId, next);
-      this.activeItemId = itemId;
-      setPartialTranscript(next);
-      if (event.delta) {
-        console.log("[Realtime] Partial transcript:", next);
-      }
+    if (type === "session.closed") {
+      this.connected = false;
       return;
     }
 
-    if (type === "conversation.item.input_audio_transcription.completed") {
-      const itemId = event.item_id ?? "default";
-      const transcript =
-        event.transcript?.trim() || this.partialByItem.get(itemId)?.trim() || "";
-
-      this.partialByItem.delete(itemId);
-      if (this.activeItemId === itemId) {
-        this.activeItemId = null;
-        setPartialTranscript("");
+    if (type === "session.input_transcript.delta") {
+      this.inputPartial += event.delta ?? "";
+      setPartialTranscript(this.inputPartial);
+      if (event.delta) {
+        console.log("[Realtime] Input transcript:", this.inputPartial);
       }
+      this.scheduleFinalize();
+      return;
+    }
 
-      if (transcript) {
-        finalizeRealtimeTranscript(transcript);
+    if (type === "session.output_transcript.delta") {
+      this.outputPartial += event.delta ?? "";
+      setPartialTranslation(this.outputPartial);
+      if (event.delta) {
+        console.log("[Realtime] Output translation:", this.outputPartial);
       }
+      this.scheduleFinalize();
+      return;
+    }
+
+    if (
+      type === "session.input_transcript.completed" ||
+      type === "session.input_transcript.done"
+    ) {
+      if (event.transcript?.trim()) {
+        this.inputPartial = event.transcript.trim();
+        setPartialTranscript(this.inputPartial);
+      }
+      this.commitCurrentTurn();
+      return;
+    }
+
+    if (
+      type === "session.output_transcript.completed" ||
+      type === "session.output_transcript.done"
+    ) {
+      if (event.transcript?.trim()) {
+        this.outputPartial = event.transcript.trim();
+        setPartialTranslation(this.outputPartial);
+      }
+      this.commitCurrentTurn();
     }
   }
 
@@ -237,7 +270,7 @@ export class OpenAiRealtimeTranscriber {
     }
 
     this.send({
-      type: "input_audio_buffer.append",
+      type: "session.input_audio_buffer.append",
       audio: pcmChunk.toString("base64"),
     });
   }
@@ -245,10 +278,24 @@ export class OpenAiRealtimeTranscriber {
   disconnect(): void {
     this.closed = true;
     this.connected = false;
-    this.partialByItem.clear();
-    this.activeItemId = null;
+
+    if (this.finalizeTimer) {
+      clearTimeout(this.finalizeTimer);
+      this.finalizeTimer = null;
+    }
+
+    this.commitCurrentTurn();
     this.rejectConnect = null;
-    setPartialTranscript("");
+    clearPartials();
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && !this.closingSession) {
+      this.closingSession = true;
+      try {
+        this.send({ type: "session.close" });
+      } catch {
+        // ignore
+      }
+    }
 
     if (this.ws) {
       try {

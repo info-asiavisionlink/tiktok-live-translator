@@ -6,6 +6,7 @@ import { dir } from "tmp-promise";
 import type { FfmpegCommand } from "fluent-ffmpeg";
 import { pipePcmToRealtime, stopPcmAudioPipe } from "./audio-pcm-pipe";
 import { OpenAiRealtimeTranscriber } from "./openai-realtime-transcriber";
+import { flushAllEventBuffers } from "./n8n-buffers";
 import { flushTranscriptBlock } from "./realtime-transcript-handler";
 import { resolveFfmpegPath } from "./stream-probe";
 import { saveTranscript } from "./transcript-handler";
@@ -506,6 +507,7 @@ export async function stopAudioTranscription(): Promise<void> {
   }
 
   await flushTranscriptBlock();
+  await flushAllEventBuffers();
 
   if (state.tmpDir) {
     try {

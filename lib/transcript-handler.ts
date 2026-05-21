@@ -12,7 +12,7 @@ export async function saveTranscript(original: string): Promise<void> {
     translated: "",
     detectedLanguage: "auto",
   });
-  getSessionStore().appendTranscriptBuffer(trimmed);
+  getSessionStore().appendTranscriptBuffer(trimmed, "");
 
   console.log("[Transcript] Stored:", trimmed);
 }

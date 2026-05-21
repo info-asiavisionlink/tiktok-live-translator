@@ -28,6 +28,7 @@ export interface LiveSessionView {
   status: SessionStatus;
   currentTranscript: Transcript | null;
   currentPartialTranscript: string;
+  currentPartialTranslation: string;
   transcripts: Transcript[];
 }
 
@@ -55,6 +56,7 @@ export function useLiveSession() {
     status: EMPTY_STATUS,
     currentTranscript: null,
     currentPartialTranscript: "",
+    currentPartialTranslation: "",
     transcripts: [],
   });
   const [comments, setComments] = useState<Comment[]>([]);
@@ -89,6 +91,7 @@ export function useLiveSession() {
         status: { ...data.status },
         currentTranscript,
         currentPartialTranscript: data.currentPartialTranscript ?? "",
+        currentPartialTranslation: data.currentPartialTranslation ?? "",
         transcripts: [...data.transcripts],
       });
       setComments([...data.comments]);
@@ -116,6 +119,7 @@ export function useLiveSession() {
       status: EMPTY_STATUS,
       currentTranscript: null,
       currentPartialTranscript: "",
+      currentPartialTranslation: "",
       transcripts: [],
     });
     setComments([]);
@@ -139,11 +143,12 @@ export function useLiveSession() {
       setError(null);
       setSuccessMessage(null);
       setSession({
-      status: EMPTY_STATUS,
-      currentTranscript: null,
-      currentPartialTranscript: "",
-      transcripts: [],
-    });
+        status: EMPTY_STATUS,
+        currentTranscript: null,
+        currentPartialTranscript: "",
+        currentPartialTranslation: "",
+        transcripts: [],
+      });
       setComments([]);
       setGifts([]);
       stopPolling();
