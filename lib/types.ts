@@ -33,7 +33,8 @@ export interface SessionStatus {
   totalLikes: number;
   followCount: number;
   totalTranscripts: number;
-  totalComments: number;
+  /** Cumulative comments received this session (UI only; not trimmed with comment list). */
+  totalCommentCount: number;
   totalGiftCount: number;
   totalGiftCoins: number;
 }

@@ -56,7 +56,10 @@ export function StatusPanel({ status }: StatusPanelProps) {
             label="Total Transcripts"
             value={formatCount(status.totalTranscripts)}
           />
-          <Stat label="Total Comments" value={formatCount(status.totalComments)} />
+          <Stat
+            label="Total Comments"
+            value={formatCount(status.totalCommentCount)}
+          />
           <Stat label="Total Gifts" value={formatCount(status.totalGiftCount)} />
           <Stat
             label="Total Gift Coins"

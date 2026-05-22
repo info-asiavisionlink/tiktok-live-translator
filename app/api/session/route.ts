@@ -25,5 +25,6 @@ export async function GET() {
     comments: snapshot.comments,
     gifts: snapshot.gifts,
     status: snapshot.status,
+    totalCommentCount: snapshot.status.totalCommentCount,
   });
 }

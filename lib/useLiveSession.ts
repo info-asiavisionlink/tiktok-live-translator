@@ -19,7 +19,7 @@ const EMPTY_STATUS: SessionStatus = {
   totalLikes: 0,
   followCount: 0,
   totalTranscripts: 0,
-  totalComments: 0,
+  totalCommentCount: 0,
   totalGiftCount: 0,
   totalGiftCoins: 0,
 };

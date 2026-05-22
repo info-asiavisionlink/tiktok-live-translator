@@ -26,7 +26,7 @@ function emptyStatus(): SessionStatus {
     totalLikes: 0,
     followCount: 0,
     totalTranscripts: 0,
-    totalComments: 0,
+    totalCommentCount: 0,
     totalGiftCount: 0,
     totalGiftCoins: 0,
   };
@@ -102,6 +102,13 @@ export class SessionStore {
     this.status = {
       ...this.status,
       followCount: this.status.followCount + 1,
+    };
+  }
+
+  incrementTotalCommentCount(): void {
+    this.status = {
+      ...this.status,
+      totalCommentCount: this.status.totalCommentCount + 1,
     };
   }
 
@@ -210,10 +217,6 @@ export class SessionStore {
   addComment(entry: Omit<Comment, "id">): Comment {
     const comment: Comment = { id: createId(), ...entry };
     this.comments = [comment, ...this.comments].slice(0, MAX_ITEMS);
-    this.status = {
-      ...this.status,
-      totalComments: this.comments.length,
-    };
     return comment;
   }
 

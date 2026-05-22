@@ -176,6 +176,8 @@ export async function connectToTikTokLive(username: string): Promise<void> {
       typeof data.comment === "string" ? data.comment : String(data.comment ?? "");
     const timestamp = new Date().toISOString();
 
+    store.incrementTotalCommentCount();
+
     bufferComment({
       username: chatUsername,
       original: text,
